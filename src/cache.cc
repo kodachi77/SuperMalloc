@@ -63,30 +63,30 @@ struct linked_list
 
 struct cached_objects
 {
-    ATTRIBUTE_ALIGNED( 32 ) uint64_t bytecount;
+    uint64_t     ALIGNED( 32 ) bytecount;
     linked_list* head;
     linked_list* tail;
 };
 
 static const cached_objects empty_cached_objects = { 0, NULL, NULL };
 
-struct CacheForBin
+struct ALIGNED( 64 ) CacheForBin
 {
     cached_objects co[2];
-} ATTRIBUTE_ALIGNED( 64 );
+};
 // it's OK if the cached objects are on the same cacheline as the lock, but we don't want the cached objects to cross a cache boundary.  Since the CacheForBin has gotten to be 48 bytes, we might as well just align the struct to the cache.
 
-struct CacheForCpu
+struct ALIGNED( 64 ) CacheForCpu
 {
 #ifdef ENABLE_STATS
     uint64_t attempt_count, success_count;
 #endif
     CacheForBin cb[first_huge_bin_number];
-} ATTRIBUTE_ALIGNED( 64 );
+};
 
-static ATTRIBUTE_THREAD CacheForCpu cache_for_thread = {};
+static CacheForCpu ATTRIBUTE_THREAD cache_for_thread = {};
 
-static ATTRIBUTE_THREAD bool cache_inited = false;
+static bool ATTRIBUTE_THREAD cache_inited = false;
 #if defined( __linux__ )
 static pthread_key_t  key;
 static pthread_once_t once_control = PTHREAD_ONCE_INIT;
@@ -178,7 +178,7 @@ static const int global_cache_depth = 8;
 
 struct GlobalCacheForBin
 {
-    ATTRIBUTE_ALIGNED( 64 ) uint8_t n_nonempty_caches;
+    uint8_t        ALIGNED( 64 ) n_nonempty_caches;
     cached_objects co[global_cache_depth];
 };
 
@@ -735,7 +735,6 @@ try_put_cached_both( linked_list* obj, CacheForBin* cb, uint64_t size, uint64_t 
 static bool
 predo_try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objects* cco )
 {
-#if 1
     uint64_t old_cco_bytecount = cco->bytecount;
     if( old_cco_bytecount < per_cpu_cache_bytecount_limit )
     {
@@ -745,7 +744,6 @@ predo_try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached
         prefetch_write( cco );
         return true;
     }
-#endif
     return false;
 }
 
@@ -759,7 +757,6 @@ predo_put_into_cpu_cache( linked_list* obj, cached_objects* tco, CacheForBin* cc
 static bool
 try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objects* cco, uint64_t siz )
 {
-#if 1
     uint64_t     old_cco_bytecount = cco->bytecount;
     linked_list* old_cco_head      = cco->head;
     if( old_cco_bytecount < per_cpu_cache_bytecount_limit )
@@ -779,7 +776,6 @@ try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objec
 
         return true;
     }
-#endif
     return false;
 }
 
@@ -796,7 +792,6 @@ ATTRIBUTE_UNROLL
 static void
 predo_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t /*siz*/ )
 {
-#if 1
     for( int i = 0; i < 2; i++ )
     {
         uint64_t old_bytecount = cc->co[i].bytecount;
@@ -808,14 +803,12 @@ predo_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t /*siz*
             return;
         }
     }
-#endif
 }
 
 ATTRIBUTE_UNROLL
 static bool
 do_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t siz )
 {
-#if 1
     for( int i = 0; i < 2; i++ )
     {
         uint64_t old_bytecount = cc->co[i].bytecount;
@@ -829,7 +822,6 @@ do_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t siz )
             return true;
         }
     }
-#endif
     return false;
 }
 
@@ -838,7 +830,6 @@ try_put_into_cpu_cache( linked_list* obj, int processor, binnumber_t bin, uint64
 // Effect: Move obj and stuff from a threadcache into a cpu cache, if the cpu has space.
 // Requires: the threadcache has stuff in it.
 {
-#if 1
     if( use_threadcache )
     {
         init_cache();
@@ -852,7 +843,6 @@ try_put_into_cpu_cache( linked_list* obj, int processor, binnumber_t bin, uint64
         return atomically( &cpu_cache_locks[processor][bin], "put_one_into_cpu_cache", predo_put_one_into_cpu_cache,
                            do_put_one_into_cpu_cache, obj, &cache_for_cpu[processor].cb[bin], siz );
     }
-#endif
 }
 
 static void

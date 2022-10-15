@@ -12,11 +12,11 @@
 static const int processor_number_limit = 128;    // should be enough for now.
 static uint64_t  partitioned_footprint[processor_number_limit];
 
-struct processor_id
+struct ALIGNED( 64 ) processor_id
 {
     int cpuid;
     int count;
-} ATTRIBUTE_ALIGNED( 64 );
+};
 
 static const int                     prid_cache_time = 128;
 static ATTRIBUTE_THREAD processor_id prid;

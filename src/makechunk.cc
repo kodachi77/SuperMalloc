@@ -95,6 +95,35 @@ unmap( void* p, size_t size )
 #endif
 }
 
+#if defined( _WIN64 )
+void*
+mmap_allocate_space( size_t size )
+{
+    DWORD flag = 0;
+    // FIXME: if( size > ::GetLargePageMinimum() ) flag |= MEM_LARGE_PAGES; /* this causes some issues in madvise */
+    void* r = ::VirtualAlloc( NULL, size, flag | MEM_RESERVE, PAGE_READWRITE );
+    if( !r )
+    {
+        fprintf( stderr, " VirtualAlloc failed. Error = %d\n", GetLastError() );
+        return NULL;
+    }
+
+    //__sync_fetch_and_add( &total_mapped, size );
+
+    return r;
+}
+
+void
+mmap_commit_page( void* ptr, size_t size )
+{
+    void* r = ::VirtualAlloc( ptr, size, MEM_COMMIT, PAGE_READWRITE );
+    if( !r ) { fprintf( stderr, " VirtualAlloc failed. Error = %d\n", GetLastError() ); }
+
+    //__sync_fetch_and_add( &total_mapped, size );
+}
+
+#endif
+
 static void*
 chunk_create_slow( size_t n_chunks )
 {

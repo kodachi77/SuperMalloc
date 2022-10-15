@@ -1,9 +1,9 @@
 .vs
 Thumbs.db
 *.obj
-*.exe
-!/tools/*.exe
+*.o
 *.dll
+*.so
 *.pdb
 *.user
 *.aps
@@ -16,6 +16,7 @@ Thumbs.db
 *.tlb
 *.tlh
 *.bak
+*.~*
 *.cache
 *.ilk
 *.log
@@ -24,4 +25,9 @@ Thumbs.db
 *.sln
 *.vcxproj
 *.vcxproj.*
+bin
 __build
+Makefile
+*.make
+src/generated_constants.c*
+src/generated_constants.h*

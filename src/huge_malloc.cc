@@ -1,6 +1,7 @@
 #ifdef __linux__
 #include <sys/mman.h>
 #endif
+#include <stddef.h>
 #include <algorithm>
 
 #ifdef TESTING
@@ -12,7 +13,7 @@
 #include "generated_constants.h"
 #include "malloc_internal.h"
 
-static lock_t huge_lock;
+static lock_t huge_lock = LOCK_INITIALIZER;
 
 // free_chunks[0] is a list of 1-chunk objects (which are, by definition chunk-aligned)
 // free_chunks[1] is a list of 2-chunk objects which are also 2-chunk aligned (that is 4MiB-aligned).
@@ -57,7 +58,8 @@ put_cached_power_of_two_chunks( chunknumber_t cn, int list_number )
     {
         while( 1 )
         {
-            chunknumber_t hd     = atomic_load( &free_chunks[list_number] );
+            chunknumber_t hd = atomic_load( &free_chunks[list_number] );
+            commit_ci_page_as_needed( cn );
             chunk_infos[cn].next = hd;
             if( __sync_bool_compare_and_swap( &free_chunks[list_number], hd, cn ) ) break;
         }
@@ -124,11 +126,8 @@ huge_malloc( size_t size )
     void* c = get_power_of_two_n_chunks( n_chunks );
     if( c == NULL ) return NULL;
 
-#if defined( __linux__ )
     madvise( c, n_chunks * chunksize, MADV_DONTNEED );
-#elif defined( _WIN64 )
-    win32_madvise( c, n_chunks * chunksize, MADV_DONTNEED );
-#endif
+
     size_t n_whole_chunks = size / chunksize;
     size_t n_bytes_at_end = size - n_whole_chunks * chunksize;
     if( n_bytes_at_end == 0 || ( chunksize - n_bytes_at_end < chunksize / 8 ) )
@@ -157,6 +156,7 @@ huge_malloc( size_t size )
     binnumber_t    bin      = size_2_bin( n_chunks * chunksize );
     bin_and_size_t b_and_s  = bin_and_size_to_bin_and_size( bin, size );
     bassert( b_and_s != 0 );
+    commit_ci_page_as_needed( chunknum );
     chunk_infos[chunknum].bin_and_size = b_and_s;
     return c;
 }
@@ -174,18 +174,13 @@ huge_free( void* m )
     bassert( bnt != 0 );
     binnumber_t   bin   = bin_from_bin_and_size( bnt );
     uint64_t      siz   = bin_2_size( bin );
-    chunknumber_t csiz  = ceil( siz, chunksize );
+    chunknumber_t csiz  = static_cast<uint32_t>( ceil( siz, chunksize ) );
     uint64_t      hceil = hyperceil( csiz );
     uint32_t      hlog  = lg_of_power_of_two( hceil );
     bassert( hlog < log_max_chunknumber );
     {
-#if defined( __linux__ )
         int r = madvise( m, siz, MADV_DONTNEED );
         bassert( r == 0 );    // Should we really check this?
-#elif defined( _WIN64 )
-        int r = win32_madvise( m, siz, MADV_DONTNEED );
-        bassert( r == 0 );
-#endif
     }
     put_cached_power_of_two_chunks( cn, hlog );
 }
@@ -211,14 +206,14 @@ test_huge_malloc( void )
     void* b = huge_malloc( largest_large + 2 );
     bassert( offset_in_chunk( b ) == 0 );
     chunknumber_t b_n = address_2_chunknumber( b );
-    if( print ) printf( "b=%p diff=0x%llx a_n-b_n=%d\n", b, (char*) a - (char*) b, (int) a_n - (int) b_n );
+    if( print ) printf( "b=%p diff=0x%tx a_n-b_n=%d\n", b, ptrdiff_t( (char*) a - (char*) b ), (int) a_n - (int) b_n );
     bassert( bin_from_bin_and_size( chunk_infos[b_n].bin_and_size ) == first_huge_bin_number );
 
     void* c = huge_malloc( 2 * chunksize );
     bassert( offset_in_chunk( c ) == 0 );
     chunknumber_t c_n = address_2_chunknumber( c );
     if( print )
-        printf( "c=%p diff=0x%llx bin = %u,%u b_n=%d c_n=%d\n", c, (char*) b - (char*) c,
+        printf( "c=%p diff=0x%tx bin = %u,%u b_n=%d c_n=%d\n", c, ptrdiff_t( (char*) b - (char*) c ),
                 bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ), chunk_infos[c_n].bin_and_size >> 7, b_n, c_n );
     bassert( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 

@@ -37,7 +37,9 @@ print_bin_stats()
 {
     printf( "bin: n_mallocs net_n_mallocs highwater\n" );
     for( binnumber_t i = 0; i <= first_huge_bin_number; i++ )
-    { printf( "%d: %lu %lu %lu\n", i, stats.b[i].n_mallocs, stats.b[i].net_n_mallocs, stats.b[i].highwater_mark ); }
+    {
+        printf( "%d: %lu %lu %lu\n", i, stats.b[i].n_mallocs, stats.b[i].net_n_mallocs, stats.b[i].highwater_mark );
+    }
 }
 
 #endif

@@ -5,7 +5,7 @@ set "LIB="
 set Path=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem
 
 set "VSPath="
-for /f "delims=" %%a in ('%~dp0vswhere -nologo -version ^[15^,16^) -property installationPath') do set "VSPath=%%a"
+for /f "delims=" %%a in ('%~dp0vswhere -nologo -version ^[15^,17^] -property installationPath') do set "VSPath=%%a"
 if "%VSPath%"=="" goto no_vs
 
 call "%VSPath%\VC\Auxiliary\Build\vcvarsall.bat" x64

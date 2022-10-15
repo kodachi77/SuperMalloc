@@ -6,11 +6,11 @@
 #include "generated_constants.h"
 #include "malloc_internal.h"
 
-lock_t small_locks[first_large_bin_number] = {};
+lock_t small_locks[first_large_bin_number] = { REPEAT_FOR_SMALL_BINS( LOCK_INITIALIZER ) };
 
 static struct
 {
-    ATTRIBUTE_ALIGNED( 4096 ) dynamic_small_bin_info lists;
+    dynamic_small_bin_info ALIGNED( 4096 ) lists;
 
     // 0 means all pages are full (all the pages are in slot 0).
     // Else 1 means there's a page with 1 free slot, and some page is in slot 1.
@@ -87,8 +87,8 @@ verify_small_invariants()
             for( per_folio* pp = dsbi.lists.b[start + i]; pp; pp = pp->next )
             {
                 bassert( prev_pp == pp->prev );
-                prev_pp = pp;
-                int sum = 0;
+                prev_pp      = pp;
+                uint64_t sum = 0;
                 for( uint32_t j = 0; j < folio_bitmap_n_words; j++ ) { sum += __builtin_popcountl( pp->inuse_bitmap[j] ); }
                 bassert( sum == opp - i );
             }
@@ -126,7 +126,7 @@ do_small_malloc_add_pages_from_new_chunk( binnumber_t bin, uint32_t dsbi_offset,
 }
 
 static void
-predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t /*o_size*/ )
+predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint64_t /*o_size*/ )
 {
     uint32_t fullest = atomic_load( &dsbi.fullest_offset[bin] );
     if( fullest == 0 ) return;    // A chunk must be allocated.
@@ -165,7 +165,7 @@ predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t /*o_size*/ )
     }
 
     // prefetch the bitmap
-    for( uint32_t w = 0; w < ceil( o_per_folio, 64 ); w++ )
+    for( uint32_t w = 0; w < ceil32( o_per_folio, 64 ); w++ )
     {
         uint64_t bw = atomic_load( &result_pp->inuse_bitmap[w] );
         if( bw != UINT64_MAX )
@@ -177,7 +177,7 @@ predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t /*o_size*/ )
 }
 
 static void*
-do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
+do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint64_t o_size )
 // Effect: If there is one get an object out of the fullest nonempty page, and return it.
 //    If there is no such object return NULL.
 //    (Previously, we made sure there was something in a nonempty page, but
@@ -235,7 +235,7 @@ do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
     }
 
     // Now set the bitmap
-    uint32_t w_max = ceil( static_bin_info[bin].objects_per_folio, 64 );
+    uint32_t w_max = ceil32( static_bin_info[bin].objects_per_folio, 64 );
     for( uint32_t w = 0; w < w_max; w++ )
     {
         uint64_t bw = result_pp->inuse_bitmap[w];
@@ -297,7 +297,7 @@ small_malloc( binnumber_t bin )
     bassert( bin < first_large_bin_number );
     uint32_t            dsbi_offset      = dynamic_small_bin_offset( bin );
     objects_per_folio_t o_per_folio      = static_bin_info[bin].objects_per_folio;
-    uint32_t            o_size           = static_bin_info[bin].object_size;
+    uint64_t            o_size           = static_bin_info[bin].object_size;
     uint16_t            folios_per_chunk = static_bin_info[bin].folios_per_chunk;
     while( 1 )
     {
@@ -312,12 +312,14 @@ small_malloc( binnumber_t bin )
             if( chunk == NULL ) return NULL;
             bin_and_size_t b_and_s = bin_and_size_to_bin_and_size( bin, 0 );
             bassert( b_and_s != 0 );
-            chunk_infos[address_2_chunknumber( chunk )].bin_and_size = b_and_s;
+            chunknumber_t chunknum = address_2_chunknumber( chunk );
+            commit_ci_page_as_needed( chunknum );
+            chunk_infos[chunknum].bin_and_size = b_and_s;
 
             small_chunk_header* sch = (small_chunk_header*) chunk;
             for( uint32_t i = 0; i < folios_per_chunk; i++ )
             {
-                for( uint32_t w = 0; w < ceil( o_per_folio, 64 ); w++ ) { sch->ll[i].inuse_bitmap[w] = 0; }
+                for( uint32_t w = 0; w < ceil32( o_per_folio, 64 ); w++ ) { sch->ll[i].inuse_bitmap[w] = 0; }
                 sch->ll[i].prev = ( i == 0 ) ? NULL : &sch->ll[i - 1];
                 sch->ll[i].next = ( i + 1 == folios_per_chunk ) ? NULL : &sch->ll[i + 1];
             }
@@ -375,7 +377,7 @@ time_small_malloc( void )
     WHEN_MICROTIMING( (
         {
             printf( "%5.1f clocks/small_malloc\n", clocks_in_small_malloc / (double) ncalls );
-            printf( "%5.1f clocks/small_malloc spent early small malloc\n", 
+            printf( "%5.1f clocks/small_malloc spent early small malloc\n",
                     clocks_spent_in_early_small_malloc / (double) ncalls );
             printf( "%5.1f clocks/small_malloc spent initializing small chunks\n",
                     clocks_spent_initializing_small_chunks / (double) ncalls );
@@ -395,14 +397,14 @@ static void
 predo_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_offset )
 {
     uint16_t o_per_folio = static_bin_info[bin].objects_per_folio;
-    uint32_t old_count   = 0;
-    uint32_t imax        = ceil( static_bin_info[bin].objects_per_folio, 64 );
+    uint64_t old_count   = 0;
+    uint32_t imax        = ceil32( static_bin_info[bin].objects_per_folio, 64 );
     for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( atomic_load( &pp->inuse_bitmap[i] ) );
     // prefetch for clearing the bit.  We know it was just loaded, so we don't have to load it again.
     bassert( objnum / 64 < imax );
     prefetch_write( &pp->inuse_bitmap[objnum / 64] );
 
-    uint32_t old_offset_within = o_per_folio - old_count;
+    uint32_t old_offset_within = o_per_folio - static_cast<uint16_t>( old_count );
     uint32_t old_offset_dsbi   = dsbi_offset + old_offset_within;
     uint32_t new_offset        = old_offset_dsbi + 1;
 
@@ -435,8 +437,8 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
 // or else a pointer to a folio that should be freed.
 {
     uint16_t o_per_folio = static_bin_info[bin].objects_per_folio;
-    uint32_t old_count   = 0;
-    uint32_t imax        = ceil( static_bin_info[bin].objects_per_folio, 64 );
+    uint64_t old_count   = 0;
+    uint32_t imax        = ceil32( static_bin_info[bin].objects_per_folio, 64 );
     for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( pp->inuse_bitmap[i] );
     // clear the bit.
     uint64_t old_bits = pp->inuse_bitmap[objnum / 64];
@@ -444,7 +446,7 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     pp->inuse_bitmap[objnum / 64] = old_bits & ~( 1ull << ( objnum % 64 ) );
     if( IS_TESTING ) bassert( old_count > 0 && old_count <= o_per_folio );
 
-    uint32_t old_offset_within = o_per_folio - old_count;
+    uint32_t old_offset_within = o_per_folio - static_cast<uint16_t>( old_count );
     uint32_t new_offset_within = old_offset_within + 1;
     uint32_t old_offset_dsbi   = dsbi_offset + old_offset_within;
     uint32_t new_offset        = old_offset_dsbi + 1;
@@ -531,14 +533,15 @@ small_free( void* p )
     uint64_t    wasted_offset = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
     uint64_t    useful_offset = offset_in_chunk( p ) - wasted_offset;
     bassert( reinterpret_cast<uint64_t>( p ) >= wasted_offset );
-    uint32_t   folio_num       = divide_offset_by_foliosize( useful_offset, bin );
-    per_folio* pp              = &sch->ll[folio_num];
-    uint32_t   folio_size      = static_bin_info[bin].folio_size;
-    uint32_t   offset_in_folio = useful_offset - folio_num * folio_size;
-    uint64_t   objnum          = divide_offset_by_objsize( offset_in_folio, bin );
+    uint32_t   folio_num  = divide_offset_by_foliosize( static_cast<uint32_t>( useful_offset ), bin );
+    per_folio* pp         = &sch->ll[folio_num];
+    uint32_t   folio_size = static_cast<uint32_t>( static_bin_info[bin].folio_size );
+    bassert( useful_offset <= UINT32_MAX );
+    uint32_t offset_in_folio = useful_offset - folio_num * folio_size;
+    uint64_t objnum          = divide_offset_by_objsize( offset_in_folio, bin );
     if( IS_TESTING )
     {
-        uint32_t o_size  = static_bin_info[bin].object_size;
+        uint64_t o_size  = static_bin_info[bin].object_size;
         uint64_t objnum2 = offset_in_folio / o_size;
         bassert( objnum == objnum2 );
     }
@@ -555,12 +558,7 @@ small_free( void* p )
         // of it.)
         bassert( madvise_me == pp );
         uint64_t madvise_address = ( chunk_num * chunksize ) + wasted_offset + folio_num * folio_size;
-#if defined( __linux__ )
         madvise( reinterpret_cast<void*>( madvise_address ), folio_size, MADV_DONTNEED );
-#elif defined( _WIN64 )
-        win32_madvise( reinterpret_cast<void*>( madvise_address ), folio_size, MADV_DONTNEED );
-#endif
-
         // Now put it back into the list.
         // Doing this will not change the fullest offset, since this is fully empty.
         // Cannot quite do this with a compare-and-swap since we have to update dsbi.lists[new_offset] as well as the prev pointer
@@ -585,13 +583,13 @@ test_bin_27()
     {
         for( int objnum = 0; objnum < n_objects; objnum++ )
         {
-            const binnumber_t bin = 27;
-            allocated[objnum]     = small_malloc( bin );
-            int32_t wasted_offset = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
-            int32_t useful_offset = offset_in_chunk( allocated[objnum] ) - wasted_offset;
-            folio_numbers[objnum] = useful_offset / static_bin_info[bin].folio_size;
-            object_numbers_in_folio[objnum] =
-                ( useful_offset - folio_numbers[objnum] * static_bin_info[bin].folio_size ) / static_bin_info[bin].object_size;
+            const binnumber_t bin           = 27;
+            allocated[objnum]               = small_malloc( bin );
+            int32_t wasted_offset           = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
+            int32_t useful_offset           = static_cast<uint32_t>( offset_in_chunk( allocated[objnum] ) - wasted_offset );
+            folio_numbers[objnum]           = useful_offset / static_cast<uint32_t>( static_bin_info[bin].folio_size );
+            object_numbers_in_folio[objnum] = static_cast<uint32_t>(
+                ( useful_offset - folio_numbers[objnum] * static_bin_info[bin].folio_size ) / static_bin_info[bin].object_size );
             small_chunk_header* sch = reinterpret_cast<small_chunk_header*>( address_2_chunkaddress( allocated[objnum] ) );
             pps[objnum]             = &sch->ll[folio_numbers[objnum]];
             bassert( object_numbers_in_folio[objnum] < 64 );

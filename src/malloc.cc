@@ -83,7 +83,9 @@ test_size_2_bin( void )
 static unsigned int initialize_lock = 0;
 struct chunk_info*  chunk_infos;
 
-uint32_t n_cores;
+const size_t n_elts                    = 1ull << 27;
+uint32_t     ci_bitfields[n_elts / 32] = {};
+uint32_t     n_cores;
 
 #ifdef DO_FAILED_COUNTS
 atomic_stats_s atomic_stats;
@@ -139,7 +141,6 @@ bool use_threadcache = true;
 
 static void ( *free_p )( void* );
 
-
 static bool
 __SetLockPagesPrivilege()
 {
@@ -189,31 +190,25 @@ extern "C"
     //#endif
 
     if( !__SetLockPagesPrivilege() )
-	{
-		// TODO: write error message.
-	}
-
-    const size_t n_elts     = 1ull << 27;
+    {
+        // TODO: write error message.
+    }
     const size_t alloc_size = n_elts * sizeof( chunk_info );
-    const size_t n_chunks   = ceil( alloc_size, chunksize );
-    chunk_infos             = (chunk_info*) mmap_chunk_aligned_block( n_chunks );
+#if defined( __linux__ )
+    const size_t n_chunks = ceil( alloc_size, chunksize );
+    chunk_infos           = (chunk_info*) mmap_chunk_aligned_block( n_chunks );
+#elif defined( _WIN64 )
+    // to avoid committing 512Mb into memory we will reserve continous virtual space
+    // of approriate size and commit 4k pages into it as necessary
+    chunk_infos = (chunk_info*) mmap_allocate_space( alloc_size );
+    commit_ci_page_as_needed( 0 );
+#endif
     bassert( chunk_infos );
 
     n_cores = cpucores();
 
 #if defined( __linux__ )
     {
-        char* v = getenv( "SUPERMALLOC_TRANSACTIONS" );
-        if( v )
-        {
-            if( strcmp( v, "0" ) == 0 ) { use_transactions = false; }
-            else if( strcmp( v, "1" ) == 0 )
-            {
-                use_transactions = true;
-            }
-        }
-    } 
-	{
         char* v = getenv( "SUPERMALLOC_PREDO" );
         if( v )
         {
@@ -236,7 +231,7 @@ extern "C"
         }
     }
 
-    free_p = (void ( * )( void* )) ( dlsym( RTLD_NEXT, "free" ) );
+    free_p = ( void ( * )( void* ) )( dlsym( RTLD_NEXT, "free" ) );
 #elif defined( _WIN64 )
     // do nothing
 #endif
@@ -297,7 +292,7 @@ static uint64_t max_allocatable_size = ( chunksize << 27 ) - 1;
 //   SMALL fit within a chunk.  Everything within a single chunk is the same size.
 // The sizes are the powers of two (1<<X) as well as (1<<X)*1.25 and (1<<X)*1.5 and (1<<X)*1.75
 extern "C" void*
-MALLOC( size_t size )
+MALLOC( size_t size ) __THROW
 {
     maybe_initialize_malloc();
     if( size >= max_allocatable_size )
@@ -340,7 +335,7 @@ MALLOC( size_t size )
 }
 
 extern "C" void
-FREE( void* p )
+FREE( void* p ) __THROW
 {
     maybe_initialize_malloc();
     if( p == NULL ) return;
@@ -379,7 +374,8 @@ FREE( void* p )
 }
 
 extern "C" void*
-REALLOC( void* p, size_t size )
+REALLOC( void* p, size_t size ) __THROW
+
 {
     if( size >= max_allocatable_size )
     {
@@ -426,7 +422,8 @@ test_realloc( void )
 #endif
 
 extern "C" void*
-CALLOC( size_t number, size_t size )
+CALLOC( size_t number, size_t size ) __THROW
+
 {
     void* result = MALLOC( number * size );
 
@@ -448,11 +445,7 @@ CALLOC( size_t number, size_t size )
     else
     {
         // everything is page aligned.
-#if defined( __linux__ )
         madvise( base, usable_from_base, MADV_DONTNEED );
-#elif defined( _WIN64 )
-        win32_madvise( base, usable_from_base, MADV_DONTNEED );
-#endif
     }
     return result;
 }
@@ -532,7 +525,8 @@ ALIGNED_ALLOC( size_t alignment, size_t size ) __THROW
 }
 
 extern "C" int
-POSIX_MEMALIGN( void** ptr, size_t alignment, size_t size )
+POSIX_MEMALIGN( void** ptr, size_t alignment, size_t size ) __THROW
+
 {
     if( alignment & ( alignment - 1 ) )
     {
@@ -588,7 +582,7 @@ MALLOC_USABLE_SIZE( const void* ptr )
     const char* ptr_c     = reinterpret_cast<const char*>( ptr );
     size_t      base_size = bin_2_size( bin );
     bassert( base <= ptr );
-    bassert( base_size >= ptrdiff_t( ptr_c - base ) );
+    bassert( static_cast<ptrdiff_t>( base_size ) >= ptrdiff_t( ptr_c - base ) );
     return base_size - ( ptr_c - base );
 }
 
@@ -634,9 +628,9 @@ object_base( void* ptr )
         uint64_t wasted_offset = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
         bassert( offset_in_chunk( ptr ) >= wasted_offset );
         uint64_t useful_offset   = offset_in_chunk( ptr ) - wasted_offset;
-        uint32_t folio_number    = divide_offset_by_foliosize( useful_offset, bin );
+        uint32_t folio_number    = divide_offset_by_foliosize( static_cast<uint32_t>( useful_offset ), bin );
         uint64_t folio_mul       = folio_number * static_bin_info[bin].folio_size;
-        uint32_t offset_in_folio = useful_offset - folio_mul;
+        uint32_t offset_in_folio = static_cast<uint32_t>( useful_offset - folio_mul );
         uint64_t object_number   = divide_offset_by_objsize( offset_in_folio, bin );
         return reinterpret_cast<void*>( cn * chunksize + wasted_offset + folio_mul
                                         + object_number * static_bin_info[bin].object_size );
@@ -767,10 +761,10 @@ bin_and_size_t
 bin_and_size_to_bin_and_size( binnumber_t bin, size_t size )
 {
     bassert( bin < 127 );
-    uint32_t n_pages = ceil( size, pagesize );
+    uint32_t n_pages = static_cast<uint32_t>( ceil( size, pagesize ) );
     if( n_pages < ( 1 << 24 ) ) { return 1 + bin + ( 1 << 7 ) + ( n_pages << 8 ); }
     else
     {
-        return 1 + bin + ( ceil( size, chunksize ) << 8 );
+        return static_cast<bin_and_size_t>( 1 + bin + ( ceil( size, chunksize ) << 8 ) );
     }
 }

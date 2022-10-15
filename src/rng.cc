@@ -28,6 +28,6 @@ prandnum()
     // Make this aligned(64) so that we don't get any false sharing.
     // Perhaps __thread variables already avoid false sharing, but I
     // don't want to verify that.
-    static ATTRIBUTE_THREAD uint64_t ATTRIBUTE_ALIGNED( 64 ) rv = 0;
+    static uint64_t ATTRIBUTE_THREAD ALIGNED( 64 ) rv = 0;
     return Mix64( reinterpret_cast<int64_t>( &rv ) + ( ++rv ) );
 }

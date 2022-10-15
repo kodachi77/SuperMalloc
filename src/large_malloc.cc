@@ -22,7 +22,7 @@ static large_object_list_cell* free_large_objects
     [n_large_classes];    // For each large size, a list (threaded through the chunk headers) of all the free objects of that size.
 // Later we'll be a little careful about purging those large objects (and we'll need to remember which are which, but we may also want thread-specific parts).  For now, just purge them all.
 
-static lock_t large_lock;
+static lock_t large_lock = LOCK_INITIALIZER;
 
 void
 predo_large_malloc_pop( large_object_list_cell** free_head )
@@ -61,7 +61,7 @@ large_malloc( size_t size )
 //  for these pages we disable hugepages.)
 {
     if( 0 ) printf( "large_malloc(%" PRIu64 "):\n", size );
-    uint32_t    footprint   = pagesize * ceil( size, pagesize );
+    uint32_t    footprint   = static_cast<uint32_t>( pagesize * ceil( size, pagesize ) );
     binnumber_t b           = size_2_bin( size );
     size_t      usable_size = bin_2_size( b );
     bassert( b >= first_large_bin_number );
@@ -132,7 +132,9 @@ large_malloc( size_t size )
 
             bin_and_size_t b_and_s = bin_and_size_to_bin_and_size( b, footprint );
             bassert( b_and_s != 0 );
-            chunk_infos[address_2_chunknumber( chunk )].bin_and_size = b_and_s;
+            chunknumber_t chunknum = address_2_chunknumber( chunk );
+            commit_ci_page_as_needed( chunknum );
+            chunk_infos[chunknum].bin_and_size = b_and_s;
 
             // Do this atomically.
             if( 0 )
@@ -188,13 +190,10 @@ large_free( void* p )
     bassert( first_large_bin_number <= bin && bin < first_huge_bin_number );
     uint64_t usable_size = bin_2_size( bin );
 
-#if defined( __linux__ )
     madvise( p, usable_size, MADV_DONTNEED );
-#elif defined( _WIN64 )
-    win32_madvise( p, usable_size, MADV_DONTNEED );
-#endif
+
     uint64_t offset = offset_in_chunk( p );
-    uint64_t objnum = divide_offset_by_objsize( offset - offset_of_first_object_in_large_chunk, bin );
+    uint64_t objnum = divide_offset_by_objsize( static_cast<uint32_t>( offset - offset_of_first_object_in_large_chunk ), bin );
     if( IS_TESTING )
     {
         uint64_t objnum2 = ( offset - offset_of_first_object_in_large_chunk ) / usable_size;

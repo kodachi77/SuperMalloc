@@ -10,8 +10,8 @@ extern "C"
 {
 #endif
 
-    void* super_malloc( size_t /*size*/ ) __THROW ATTRIBUTE_MALLOC;
-    void* super_calloc( size_t /*number*/, size_t /*size*/ ) __THROW ATTRIBUTE_MALLOC;
+    void* super_malloc( size_t /*size*/ ) __THROW;
+    void* super_calloc( size_t /*number*/, size_t /*size*/ ) __THROW;
     void  super_free( void* /*ptr*/ ) __THROW;
     void* super_aligned_alloc( size_t /*alignment*/, size_t /*size*/ ) __THROW;
     int   super_posix_memalign( void** memptr, size_t alignment, size_t size ) __THROW;

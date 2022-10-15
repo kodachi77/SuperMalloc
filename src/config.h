@@ -1,9 +1,13 @@
-#ifndef CONFIG_H__
-#define CONFIG_H__
+#ifndef CONFIG_H
+#define CONFIG_H
 
 #include <inttypes.h>
 
 #if defined( _MSC_VER )
+
+#ifndef _WIN64
+#error "This allocator only supports 64-bit platforms."
+#endif
 
 #include <intrin.h>
 #include <nmmintrin.h>
@@ -23,7 +27,7 @@
 #define NOMENUS
 #define NOICONS
 #define NORASTEROPS
-#define OEMRESOURCE
+#define NOOEMRESOURCE
 #define NOATOM
 #define NOCLIPBOARD
 #define NOCOLOR
@@ -44,26 +48,24 @@
 
 #include <windows.h>
 
-#define ATTRIBUTE_ALIGNED( num ) __declspec( align( ( num ) ) )
-#define ATTRIBUTE_CONST
-#define ATTRIBUTE_MALLOC
+#define ALIGNED( num )   __declspec( align( ( num ) ) )
 #define ATTRIBUTE_THREAD __declspec( thread )
 #define ATTRIBUTE_UNROLL
-#define ATTRIBUTE_UNUSED
-#define ATTRIBUTE_UNUSED_RESULT
+
+#define LOCK_INITIALIZER                                                                                                         \
+    {                                                                                                                            \
+    }
 
 #define __THROW
 
-int __inline sched_yield()
+int inline sched_yield()
 {
-    // https://man7.org/linux/man-pages/man2/sched_yield.2.html
-    ::SwitchToThread();
+    ::Sleep( 0 );
     return 0;
 }
 
-unsigned int __inline sleep( unsigned int seconds )
+unsigned int inline sleep( unsigned int seconds )
 {
-    // https://man7.org/linux/man-pages/man3/sleep.3.html
     ::Sleep( seconds * 1000 );
     return 0;
 }
@@ -71,7 +73,7 @@ unsigned int __inline sleep( unsigned int seconds )
 #define MADV_WILLNEED 3 /* will need these pages */
 #define MADV_DONTNEED 4 /* dont need these pages */
 
-int __inline win32_madvise( void* addr, size_t len, int advice )
+int inline madvise( void* addr, size_t len, int advice )
 {
     int ret = 0;
     if( advice < MADV_WILLNEED || advice > MADV_DONTNEED || !len )
@@ -153,7 +155,7 @@ int __inline win32_madvise( void* addr, size_t len, int advice )
         default: break;
     }
 out:
-    //if (0) fprintf( stderr, "%d = win32_madvise(%p, %lu, %d)", ret, addr, len, advice );
+    //if (0) fprintf( stderr, "%d = madvise(%p, %lu, %d)", ret, addr, len, advice );
     return ret;
 }
 
@@ -167,32 +169,20 @@ out:
 #pragma intrinsic( _InterlockedCompareExchange64 )
 #pragma intrinsic( _InterlockedIncrement64 )
 #pragma intrinsic( _InterlockedDecrement64 )
+#pragma intrinsic( _InterlockedOr64 )
+#pragma intrinsic( _InterlockedExchangePointer )
 
 template <typename T>
 inline T
-atomic_load( T volatile* a )
+atomic_load( T* ptr )
 {
-    T value = *a;
-    MemoryBarrier();
-    return value;
+    return T( _InterlockedOr64( (volatile int64_t*) ptr, 0 ) );
 }
 
 static inline void
-atomic_store( int32_t volatile* a, int32_t v )
+atomic_store( void* ptr, uintptr_t val )
 {
-    MemoryBarrier();
-    *a = v;
-}
-
-static inline void
-atomic_store( int64_t volatile* a, int64_t v )
-{
-#ifdef _M_X64
-    MemoryBarrier();
-    *a = v;
-#else
-    (void) InterlockedExchange64( (volatile LONGLONG*) a, v );
-#endif
+    _InterlockedExchangePointer( (void* volatile*) ptr, (void*) val );
 }
 
 #define __sync_fetch_and_add( a, b )                                                                                             \
@@ -229,48 +219,34 @@ __sync_bool_compare_and_swap( int volatile* dst, int oldi, int newi )
 #define __sync_lock_release( a )                                                                                                 \
     sizeof( *a ) == sizeof( int64_t ) ? InterlockedExchange64( (volatile int64_t*) ( a ), 0 ) : InterlockedExchange( ( a ), 0 )
 
-static inline uint64_t
+static inline uint32_t
 __builtin_ffs( uint64_t v )
 {
-    //Built - in Function : int __builtin_ffs( int x ) Returns one plus the index of the least significant 1 - bit of x,
-    //    or if x is zero, returns zero.
-
-    unsigned long r = 0;
-    if( _BitScanForward64( &r, (unsigned long long) v ) ) { return (int) ( r + 1 ); }
-    return 0;
+    unsigned long index;
+    return uint32_t( _BitScanForward64( &index, (unsigned long long) v ) ? index + 1 : 0 );
 }
 
 #define __builtin_popcount  __popcnt
 #define __builtin_popcountl _mm_popcnt_u64
 
-static inline uint64_t
+static inline uint32_t
 __builtin_ctzl( uint64_t value )
 {
-    unsigned long trailing_zero = 0;
-
-    if( _BitScanForward64( &trailing_zero, value ) ) { return trailing_zero; }
-    else
-    {
-        // This is undefined, I better choose 64 than 0
-        return 64;
-    }
+    unsigned long index;
+    return uint32_t( _BitScanForward64( &index, value ) ? index : 64 );
 }
 
-static inline uint64_t
+static inline uint32_t
 __builtin_clzl( uint64_t value )
 {
-    unsigned long leading_zero = 0;
-
-    if( _BitScanReverse64( &leading_zero, value ) ) { return 63 - leading_zero; }
-    else
-        return 64;
+    unsigned long index;
+    return uint32_t( _BitScanReverse64( &index, value ) ? 63 - index : 64 );
 }
 
 static inline int
 sched_getcpu()
 {
-    // https://man7.org/linux/man-pages/man3/sched_getcpu.3.html
-    return GetCurrentProcessorNumber();
+    return ::GetCurrentProcessorNumber();
 }
 
 static inline LARGE_INTEGER
@@ -340,19 +316,13 @@ clock_gettime( int X, struct timespec* tv )
     return ( 0 );
 }
 
-//#define CONSTRUCTOR101
-
 #elif defined( __GNUC__ )
 
-#define ATTRIBUTE_ALIGNED( num ) __attribute__( ( aligned( ( num ) ) ) )
-#define ATTRIBUTE_CONST          __attribute__( ( const ) )
-#define ATTRIBUTE_MALLOC         __attribute__( ( malloc ) )
-#define ATTRIBUTE_THREAD         __thread
-#define ATTRIBUTE_UNROLL         __attribute__( ( optimize( "unroll-loops" ) ) )
-#define ATTRIBUTE_UNUSED         __attribute( ( unused ) )
-#define ATTRIBUTE_UNUSED_RESULT  __attribute__( ( warn_unused_result ) )
+#define LOCK_INITIALIZER PTHREAD_MUTEX_INITIALIZER
 
-//#define CONSTRUCTOR101 __attribute__( ( constructor( 101 ) ) )
+#define ALIGNED( num )   __attribute__( ( aligned( ( num ) ) ) )
+#define ATTRIBUTE_THREAD __thread
+#define ATTRIBUTE_UNROLL __attribute__( ( optimize( "unroll-loops" ) ) )
 
 #endif
 

@@ -34,11 +34,18 @@ bin_from_bin_and_size( bin_and_size_t bnt )
     return ( bnt & 127 ) - 1;
 }
 
-static inline uint64_t
+static inline constexpr uint64_t
 ceil( uint64_t a, uint64_t b )
 {
     return ( a + b - 1 ) / b;
 }
+
+static inline uint32_t
+ceil32( uint32_t a, uint32_t b )
+{
+    return ( a + b - 1 ) / b;
+}
+
 static inline uint64_t
 hyperceil( uint64_t a )
 // Effect: Return the smallest power of two >= a.
@@ -49,6 +56,7 @@ hyperceil( uint64_t a )
 #endif
     return r;
 }
+
 static inline int
 lg_of_power_of_two( uint64_t a )
 // Effect: Return the log_2(a).
@@ -63,11 +71,13 @@ lg_of_power_of_two( uint64_t a )
 static inline chunknumber_t
 address_2_chunknumber( const void* a )
 {
+    // TODO: static assert on pointer size
+
     // Given an address anywhere in a chunk, convert it to a chunk number from 0 to 1<<27
     uint64_t au     = reinterpret_cast<uint64_t>( a );
     uint64_t am     = au / chunksize;
     uint64_t result = am % ( 1ull << 27 );
-    return result;
+    return static_cast<chunknumber_t>( result );
 }
 
 static inline void*
@@ -134,7 +144,47 @@ const chunknumber_t null_chunknumber    = 0;
 
 extern chunknumber_t free_chunks[log_max_chunknumber];
 
-void* mmap_chunk_aligned_block( size_t n_chunks );    //
+void* mmap_chunk_aligned_block( size_t n_chunks );
+
+#if defined( __linux__ )
+static inline void commit_ci_page_as_needed( chunknumber_t /*chunknum*/ )
+{
+}
+#elif defined( _WIN64 )
+void* mmap_allocate_space( size_t size );
+void  mmap_commit_page( void* ptr, size_t size );
+
+extern uint32_t    ci_bitfields[];
+extern chunk_info* chunk_infos;
+
+static inline int
+check_ci_bit( uint32_t k )
+{
+    return ( ( ci_bitfields[k / 32] & ( 1 << ( k % 32 ) ) ) != 0 );
+}
+
+static inline void
+set_ci_bit( uint32_t k )
+{
+    ci_bitfields[k / 32] |= 1 << ( k % 32 );
+}
+
+static inline void
+commit_ci_page_as_needed( chunknumber_t chunknum )
+{
+    constexpr size_t ci_pagesize = ( 4 * 1024 );
+    static_assert( ci_pagesize % sizeof( chunk_info ) == 0, "" );
+    constexpr size_t n_ci_elts = ci_pagesize / sizeof( chunk_info );
+
+    uint32_t bit = chunknum / n_ci_elts;
+    if( !check_ci_bit( bit ) )
+    {
+        void* ptr = (char*) chunk_infos + bit * n_ci_elts * sizeof( chunk_info );
+        mmap_commit_page( ptr, ci_pagesize );
+        set_ci_bit( bit );
+    }
+}
+#endif
 
 void* large_malloc( size_t size );
 void  large_free( void* ptr );
@@ -199,11 +249,11 @@ const uint32_t max_objects_per_folio =
     2048; /* at most 2048 objects per folio. objsizes will check this when generated the constants. */
 const uint32_t folio_bitmap_n_words = max_objects_per_folio / 64;
 
-struct per_folio
+struct ALIGNED( 64 ) per_folio
 {
-    ATTRIBUTE_ALIGNED( 64 ) per_folio* next;
-    per_folio* prev;
-    uint64_t   inuse_bitmap
+    struct per_folio* next;
+    per_folio*        prev;
+    uint64_t          inuse_bitmap
         [folio_bitmap_n_words];    // up to 512 objects (8 bytes per object) per page.  The bit is set if the object is in use.
 };
 

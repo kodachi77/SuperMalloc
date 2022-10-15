@@ -19,14 +19,13 @@ struct lock_t
     union
     {
 #ifdef __linux__
-        ATTRIBUTE_ALIGNED( 64 ) pthread_mutex_t pt_m;
+        pthread_mutex_t ALIGNED( 64 ) pt_m;
 #elif defined( _WIN64 )
-        ATTRIBUTE_ALIGNED( 64 ) CRITICAL_SECTION cs_m;
+        CRITICAL_SECTION ALIGNED( 64 ) cs_m;
 #endif
-        //ATTRIBUTE_ALIGNED( 64 ) futex_mutex_t f_m;
     };
 #ifdef __linux__
-    lock_t() : pt_m( PTHREAD_MUTEX_INITIALIZER ) {}
+    //  lock_t() : pt_m( PTHREAD_MUTEX_INITIALIZER ) {}
 #elif defined( _WIN64 )
     lock_t() { InitializeCriticalSectionAndSpinCount( &cs_m, 4000 ); }
 #endif
@@ -88,7 +87,6 @@ static inline ReturnType
 atomically( lock_t* mylock, const char* /*name*/, void ( *predo )( Arguments... args ), ReturnType ( *fun )( Arguments... args ),
             Arguments... args )
 {
-    //if( mode == MODE_PTHREAD_MUTEX )
     {
         mylock_raii m( mylock );
         ReturnType  r = fun( args... );
@@ -98,73 +96,7 @@ atomically( lock_t* mylock, const char* /*name*/, void ( *predo )( Arguments... 
     __sync_fetch_and_add( &atomic_stats.atomic_count, 1 );
 #endif
     unsigned int xr = 0xfffffff2;
-//    if( have_rtm )
-//    {
-//        // Be a little optimistic: try to run the function without the predo if we the lock looks good
-//        if( mylock_subscribe( mylock ) == 0 )
-//        {
-//            xr = _xbegin();
-//            if( xr == _XBEGIN_STARTED )
-//            {
-//#ifndef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( mylock ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                ReturnType r = fun( args... );
-//#ifdef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( mylock ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                _xend();
-//                return r;
-//            }
-//        }
-//
-//        int count = 0;
-//        while( count < 10 )
-//        {
-//            mylock_hold( mylock );
-//            if( do_predo ) predo( args... );
-//            while( mylock_hold( mylock ) )
-//            {
-//                // If the lock was held for a long time, then do the predo code again.
-//                if( do_predo ) predo( args... );
-//            }
-//            xr = _xbegin();
-//            if( xr == _XBEGIN_STARTED )
-//            {
-//#ifndef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( mylock ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                ReturnType r = fun( args... );
-//#ifdef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( mylock ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                _xend();
-//                return r;
-//            }
-//            else if( ( xr & _XABORT_EXPLICIT ) && ( _XABORT_CODE( xr ) == XABORT_LOCK_HELD ) )
-//            {
-//                count = 0;    // reset the counter if we had an explicit lock contention abort.
-//                continue;
-//            }
-//            else
-//            {
-//                count++;
-//                //int backoff = (prandnum()%16) << count;
-//                for( int i = 1; i < ( 1 << count ); i++ )
-//                {
-//                    if( 0 == ( prandnum() & 1023 ) ) { sched_yield(); }
-//                    else
-//                    {
-//#ifdef __linux__
-//                        __asm__ volatile( "pause" );
-//#elif _WIN64
-//                        _mm_pause();
-//#endif
-//                    }
-//                }
-//            }
-//        }
-//    }
+
 // We finally give up and acquire the lock.
 #ifdef DO_FAILED_COUNTS
     {
@@ -195,7 +127,6 @@ static inline ReturnType
 atomically2( lock_t* lock0, lock_t* lock1, const char* /*name*/, void ( *predo )( Arguments... args ),
              ReturnType ( *fun )( Arguments... args ), Arguments... args )
 {
-    //if( mode == MODE_PTHREAD_MUTEX )
     {
         mylock_raii m0( lock0 );
         mylock_raii m1( lock1 );
@@ -206,74 +137,6 @@ atomically2( lock_t* lock0, lock_t* lock1, const char* /*name*/, void ( *predo )
     __sync_fetch_and_add( &atomic_stats.atomic_count, 1 );
 #endif
     unsigned int xr = 0xfffffff2;
-//    if( have_rtm )
-//    {
-//        // Be a little optimistic: try to run the function without the predo if we the lock looks good
-//        if( mylock_subscribe( lock0 ) == 0 && mylock_subscribe( lock1 ) == 0 )
-//        {
-//            xr = _xbegin();
-//            if( xr == _XBEGIN_STARTED )
-//            {
-//#ifndef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( lock0 ) || mylock_subscribe( lock1 ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                ReturnType r = fun( args... );
-//#ifdef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( lock0 ) || mylock_subscribe( lock1 ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                _xend();
-//                return r;
-//            }
-//        }
-//
-//        int count = 0;
-//        while( count < 10 )
-//        {
-//            mylock_hold( lock0 );
-//            mylock_hold( lock1 );
-//            if( do_predo ) predo( args... );
-//            while( mylock_hold( lock0 ) || mylock_hold( lock1 ) )
-//            {
-//                // If the lock was held for a long time, then do the predo code again.
-//                if( do_predo ) predo( args... );
-//            }
-//            xr = _xbegin();
-//            if( xr == _XBEGIN_STARTED )
-//            {
-//#ifndef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( lock0 ) || mylock_subscribe( lock1 ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                ReturnType r = fun( args... );
-//#ifdef LATE_LOCK_SUBSCRIPTION
-//                if( mylock_subscribe( lock0 ) || mylock_subscribe( lock1 ) ) _xabort( XABORT_LOCK_HELD );
-//#endif
-//                _xend();
-//                return r;
-//            }
-//            else if( ( xr & _XABORT_EXPLICIT ) && ( _XABORT_CODE( xr ) == XABORT_LOCK_HELD ) )
-//            {
-//                count = 0;    // reset the counter if we had an explicit lock contention abort.
-//                continue;
-//            }
-//            else
-//            {
-//                count++;
-//                //int backoff = (prandnum()%16) << count;
-//                for( int i = 1; i < ( 1 << count ); i++ )
-//                {
-//                    if( 0 == ( prandnum() & 1023 ) ) { sched_yield(); }
-//                    else
-//                    {
-//#ifdef __linux__
-//                        __asm__ volatile( "pause" );
-//#elif _WIN64
-//                        _mm_pause();
-//#endif
-//                    }
-//                }
-//            }
-//        }
-//    }
 // We finally give up and acquire the lock.
 #ifdef DO_FAILED_COUNTS
     {
@@ -299,12 +162,6 @@ atomically2( lock_t* lock0, lock_t* lock1, const char* /*name*/, void ( *predo )
     ReturnType  r = fun( args... );
     return r;
 }
-
-#if 0
-struct lock {
-  unsigned int l ATTRIBUTE_ALIGNED(64);
-};
-#endif
 
 #ifdef __linux__
 #define atomic_load( addr )       __atomic_load_n( addr, __ATOMIC_CONSUME )
