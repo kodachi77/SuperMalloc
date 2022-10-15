@@ -1,0 +1,11 @@
+[submodule "other-mallocs/jemalloc"]
+	path = other-mallocs/jemalloc
+	url = git@github.com:jemalloc/jemalloc.git
+[submodule "other-mallocs/tbb"]
+	path = other-mallocs/tbb
+	url = git@github.com:kuszmaul/tbb.git
+	ignore = dirty
+[submodule "other-mallocs/Hoard"]
+	path = other-mallocs/Hoard
+	url = git@github.com:emeryberger/Hoard.git
+	ignore = dirty

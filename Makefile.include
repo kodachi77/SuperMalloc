@@ -1,0 +1,146 @@
+SRC = $(ROOT)/src
+BLD = $(ROOT)/$(BUILD)
+TST = $(ROOT)/tests
+LIB = $(BLD)/lib
+
+ifdef NO_RTM
+RMTFLAGS = 
+else
+RTMFLAGS = -mrtm
+endif
+
+ifdef NOCPPRUNTIME
+  CPPRUNTIME = -DNOCPPRUNTIME=1
+  EXCEPTIONS = -fno-exceptions
+else
+  CPPRUNTIME =
+  EXCEPTIONS =
+endif
+
+ifdef PREFIX
+  PREFIXOPT = -DPREFIX=$(PREFIX)
+else
+  PREFIXOPT =
+endif
+
+C_CXX_FLAGS = -W -Wall -Werror $(OPTFLAGS) -ggdb -pthread -fPIC $(RTMFLAGS) $(COVERAGE)
+CXXFLAGS = $(C_CXX_FLAGS) -std=c++11 $(EXCEPTIONS)
+CFLAGS = $(C_CXX_FLAGS) -std=c11
+CPPFLAGS += $(STATS) $(LOGCHECK) $(TESTING) -I$(BLD) $(PREFIXOPT) $(CPPRUNTIME)
+
+LIBOBJECTS = malloc makechunk rng huge_malloc large_malloc small_malloc cache bassert footprint stats futex_mutex generated_constants has_tsx env
+default: tests
+.PHONY: default
+
+-include $(patsubst %, $(BLD)/%.d, $(LIBOBJECTS))
+
+#lib: $(LIB)/libsupermalloc.so
+#.PHONY: lib
+
+TESTS = aligned_alloc calloc posix_memalign $(UNITTESTS) test-malloc_test new-malloc-test malloc-test-fixed-work test22 cache-index madvise-small test38 test-no-overlaps #unit-timing
+TESTS_IN_DIR = $(patsubst %, $(BLD)/%, $(TESTS))
+
+LDFLAGS += -ldl
+ifeq ($LINKMODE,static)
+ IMPLEMENTATION_FILES = $(patsubst %,$(BLD)/%.o, $(LIBOBJECTS))
+else
+ IMPLEMENTATION_FILES = $(LIB)/libsupermalloc.so
+ LDFLAGS += -L$(LIB) -Wl,-rpath,$(LIB)
+endif
+LDLIBS += -ldl
+
+$(TESTS_IN_DIR): $(IMPLEMENTATION_FILES)
+tests: $(TESTS_IN_DIR)
+
+foo:
+	echo $(TESTS_IN_DIR)
+
+check: $(patsubst %, $(BLD)/%.check, $(TESTS)) \
+ check-test-malloc_test-w1 \
+ check-test-malloc_test-w2 \
+ check-test-malloc_test-w1-s4096 \
+ check-test-malloc_test-w1-s-1
+.PHONY: check %.check \
+ check-test-malloc_test-w1 \
+ check-test-malloc_test-w2 \
+ check-test-malloc_test-w1-s4096 \
+ check-test-malloc_test-w1-s-1
+
+TAGS: $(SRC)/*.cc $(SRC)/*.h $(BLD)/generated_constants.h $(BLD)/generated_constants.cc
+	etags $(SRC)/*.cc $(SRC)/*.h  $(BLD)/generated_constants.h $(BLD)/generated_constants.cc
+
+%.check: %
+	SUPERMALLOC_THREADCACHE=1 ./$<
+	SUPERMALLOC_THREADCACHE=0 ./$<
+
+check-test-malloc_test-w1: $(BLD)/test-malloc_test
+	SUPERMALLOC_THREADCACHE=0 $< -w1
+	SUPERMALLOC_THREADCACHE=1 $< -w1
+check-test-malloc_test-w2: $(BLD)/test-malloc_test
+	SUPERMALLOC_THREADCACHE=0 $< -w2
+	SUPERMALLOC_THREADCACHE=1 $< -w2
+check-test-malloc_test-w1-s4096: $(BLD)/test-malloc_test
+	SUPERMALLOC_THREADCACHE=0 $< -w1 -s 4096
+	SUPERMALLOC_THREADCACHE=0 $< -w1 -s 4096
+check-test-malloc_test-w1-s-1: $(BLD)/test-malloc_test
+	SUPERMALLOC_THREADCACHE=0 $< -w1 -s -1
+	SUPERMALLOC_THREADCACHE=0 $< -w1 -s -1
+
+OFILES = $(patsubst %, $(BLD)/%.o, $(LIBOBJECTS))
+
+$(LIB):
+	mkdir -p $(LIB)
+$(LIB)/supermalloc.a: $(OFILES) | $(LIB)
+	gcc-ar cr $(LIB)/supermalloc.a $(OFILES)
+$(LIB)/libsupermalloc.so: $(LIB)/supermalloc.a $(OFILES) | $(LIB)
+	$(CXX) $(CXXFLAGS) $(OFILES) -shared $(LDLIBS) -o $@
+
+$(BLD)/supermalloc.a: $(OFILES)
+	gcc-ar cr $(BLD)/supermalloc.a $(OFILES)
+$(BLD)/%.o: $(SRC)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BLD)/%.d: CPPFLAGS += -I$(SRC) 
+$(BLD)/%.d: $(SRC)/%.cc
+	set -e; rm -f $@; \
+              $(CXX) -MM $(CXXFLAGS) $(CPPFLAGS) $< -MG -MF $@.$$$$; \
+              sed 's,\($*\)\.o[ :]*,$(BLD)/\1.o $@ : ,g' < $@.$$$$ \
+               | sed 's,generated_constants.h,$(BLD)/generated_constants.h,' > $@; \
+              rm -f $@.$$$$
+#$(BLD):%.d: $(SRC)/%.cc
+#	rm -f $@
+#	$(CXX) -M $(CXXFLAGS) $(CPPFLAGS) $< > $@.$$$$
+#	sed 's,\($*\)\.o[ :]*,\1.o $@ : ,g' < $@.$$$$ > $@
+#	rm -f $@.$$$$
+
+$(BLD)/%.o: CPPFLAGS += -I$(SRC) 
+$(BLD)/%.o: $(TST)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+$(BLD)/%.o: $(TST)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+$(BLD)/%: $(BLD)/%.o
+	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) $(LDLIBS) $(IMPLEMENTATION_FILES) -o $@
+
+$(filter-out %/bassert.o, $(OFILES)): $(BLD)/generated_constants.h
+
+# The rule below with a pattern is preferable to the one commented out below because the commented out one will cause ./objsizes to be run twice (which is wrong and racy).  
+# A pattern rule, on the other hand, when it has multiple targets, is understood to produce all the outputs with a single run.
+# What a hack...
+
+%/generated_constants.h %/generated_constants.cc: %/objsizes
+	./$< $(patsubst %/objsizes, %/generated_constants.cc, $<) > $(patsubst %/objsizes, %/generated_constants.h, $<)
+
+$(BLD)/objsizes: $(SRC)/objsizes.cc $(SRC)/malloc_internal.h $(SRC)/bassert.h $(BLD)/bassert.o
+	$(CXX) $(CXXFLAGS) $< $(BLD)/bassert.o -o $@
+
+%.pdf: %.gnuplot %.data
+	gnuplot $<
+
+clean:
+	rm -f *.d *.d.* *.o $(TESTS) $(BLD)/objsizes $(BLD)/generated_constants.h $(BLD)/generated_constants.cc $(IMPLEMENTATION_FILES) $(LIB)/*.so
+
+.PHONY: other-mallocs
+other-mallocs:
+	(cd $(ROOT)/other-mallocs/Hoard/src;make linux-gcc-x86-64)
+	(cd $(ROOT)/other-mallocs/tbb;make)
+	(cd $(ROOT)/other-mallocs/jemalloc; ./autogen.sh;make dist;make)
