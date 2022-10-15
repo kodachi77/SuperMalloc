@@ -4,10 +4,11 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-uint64_t prandnum(void); // a threaded pseudo-random number generator.
+    uint64_t prandnum( void );    // a threaded pseudo-random number generator.
 
 #ifdef __cplusplus
 }

@@ -1,2 +1,0 @@
-change the locks to use gcc instrinsics
-maybe tune so that sched_yield is called more often

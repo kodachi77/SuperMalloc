@@ -1,7 +1,0 @@
-aligned_alloc
-calloc
-posix_memalign
-test-malloc_test
-unit-tests
-generated_constants.h
-generated_constants.cc
