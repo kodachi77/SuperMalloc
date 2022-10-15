@@ -1,10 +1,19 @@
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {  
+    Write-Error "This script requires elevated permissions."
+    Exit
+}
+
 $settings = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerSetting)
 $settings_in_subgroup = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerSettingInSubgroup)
 $possible_values = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerSettingDefinitionPossibleValue)
 $range_data = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerSettingDefinitionRangeData)
 $settings_data_idx = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerSettingDataIndex)
 
-$plan = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPpowelan -ErrorAction SilentlyContinue | Where-Object ElementName -IEQ "high performance")
+$plan = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan | Where-Object ElementName -IEQ "ultimate performance")
+if (-not $plan) {
+    Write-Warning "Cannot find plan named 'Ultimate Performance'. Using active plan."
+    $plan = (Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan | Where-Object IsActive -EQ True)
+}
 $plan_id = ($plan.InstanceID | Select-String -Pattern "{.*}$").Matches.Value
 $str = "Microsoft:PowerSettingDataIndex\\" + $plan_id
 $plan_settings_data_idx = ($settings_data_idx | Where-Object InstanceID -Match $str)
@@ -17,14 +26,10 @@ $settings_in_subgroup | Where-Object GroupComponent -Match "{$SUB_PROCESSOR}" | 
     $guid = ($_.PartComponent | Select-String -Pattern "{(.*)}`"$").Matches.Groups[1].Value
     $ps = ($settings | Where-Object InstanceID -Match $guid)
     
-    $value_elems = $possible_values | Where-Object InstanceID -Match $guid #
+    $value_elems = $possible_values | Where-Object InstanceID -Match $guid
     $r = $range_data | Where-Object InstanceID -Match $guid
     
     $setting_value = ($plan_settings_data_idx | Where-Object InstanceID -Match "\\AC\\{$guid}").SettingIndexValue
-    if ($setting_value -is [array] -and $setting_value.count) {
-        $setting_value = $setting_value[0]
-    }
-    
     $value_desc = ""
     if ($value_elems -ne $null)
     {
