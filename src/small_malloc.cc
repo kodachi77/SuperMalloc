@@ -1,14 +1,16 @@
+#ifdef __linux__
 #include <sys/mman.h>
+#endif
 #include "atomically.h"
 #include "bassert.h"
 #include "generated_constants.h"
 #include "malloc_internal.h"
 
-lock_t small_locks[first_large_bin_number] = {REPEAT_FOR_SMALL_BINS( LOCK_INITIALIZER )};
+lock_t small_locks[first_large_bin_number] = {};
 
 static struct
 {
-    dynamic_small_bin_info lists __attribute__( ( aligned( 4096 ) ) );
+    ATTRIBUTE_ALIGNED( 4096 ) dynamic_small_bin_info lists;
 
     // 0 means all pages are full (all the pages are in slot 0).
     // Else 1 means there's a page with 1 free slot, and some page is in slot 1.
@@ -124,7 +126,7 @@ do_small_malloc_add_pages_from_new_chunk( binnumber_t bin, uint32_t dsbi_offset,
 }
 
 static void
-predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size __attribute__( ( unused ) ) )
+predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t /*o_size*/ )
 {
     uint32_t fullest = atomic_load( &dsbi.fullest_offset[bin] );
     if( fullest == 0 ) return;    // A chunk must be allocated.
@@ -242,7 +244,7 @@ do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
             // Found an empty bit.
             uint64_t bwbar             = ~bw;
             int      bit_to_set        = __builtin_ctzl( bwbar );
-            result_pp->inuse_bitmap[w] = bw | ( 1ul << bit_to_set );
+            result_pp->inuse_bitmap[w] = bw | ( 1ull << bit_to_set );
 
             if( 0 ) printf( "result_pp  = %p\n", result_pp );
             if( 0 ) printf( "bit_to_set = %d\n", bit_to_set );
@@ -370,19 +372,21 @@ time_small_malloc( void )
     //printf("end  =%ld.%09ld\n", end.tv_sec,   end.tv_nsec);
     //printf("tdiff=%0.9f\n", tdiff(&start, &end));
     printf( "%fns/small_malloc\n", tdiff( &start, &end ) * 1e9 / ncalls );
-    WHEN_MICROTIMING( ( {
-        printf( "%5.1f clocks/small_malloc\n", clocks_in_small_malloc / (double) ncalls );
-        printf( "%5.1f clocks/small_malloc spent early small malloc\n", clocks_spent_in_early_small_malloc / (double) ncalls );
-        printf( "%5.1f clocks/small_malloc spent initializing small chunks\n",
-                clocks_spent_initializing_small_chunks / (double) ncalls );
-        printf( "%5.1f clocks/small_malloc spent in do_small_malloc\n", clocks_spent_in_do_small_malloc / (double) ncalls );
-        printf( "%5.1f clocks/small_malloc unaccounted for\n",
-                ( clocks_in_small_malloc - clocks_spent_in_early_small_malloc - clocks_spent_initializing_small_chunks
-                  - clocks_spent_in_do_small_malloc )
-                    / (double) ncalls );
-    } ) );
+    WHEN_MICROTIMING( (
+        {
+            printf( "%5.1f clocks/small_malloc\n", clocks_in_small_malloc / (double) ncalls );
+            printf( "%5.1f clocks/small_malloc spent early small malloc\n", 
+                    clocks_spent_in_early_small_malloc / (double) ncalls );
+            printf( "%5.1f clocks/small_malloc spent initializing small chunks\n",
+                    clocks_spent_initializing_small_chunks / (double) ncalls );
+            printf( "%5.1f clocks/small_malloc spent in do_small_malloc\n", clocks_spent_in_do_small_malloc / (double) ncalls );
+            printf( "%5.1f clocks/small_malloc unaccounted for\n",
+                    ( clocks_in_small_malloc - clocks_spent_in_early_small_malloc - clocks_spent_initializing_small_chunks
+                      - clocks_spent_in_do_small_malloc )
+                        / (double) ncalls );
+        } ) );
 
-    for( int i = 0; i < ncalls; i++ ) { free( array[i] ); }
+    for( int i = 0; i < ncalls; i++ ) { small_free( array[i] ); }
     delete[] array;
 }
 #endif    // !defined NOCPPRUNTIME
@@ -416,7 +420,9 @@ predo_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi
     // prefetch for fixing up the count
     uint32_t fullest_off = atomic_load( &dsbi.fullest_offset[bin] );
     if( old_offset_within == 0 || ( pp_next == NULL && fullest_off == old_offset_within ) )
-    { prefetch_write( &dsbi.fullest_offset[bin] ); }
+    {
+        prefetch_write( &dsbi.fullest_offset[bin] );
+    }
     per_folio* new_next = atomic_load( &dsbi.lists.b[new_offset] );
     if( new_next ) { load_and_prefetch_write( &new_next->prev ); }
     prefetch_write( &dsbi.lists.b[new_offset] );
@@ -434,8 +440,8 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( pp->inuse_bitmap[i] );
     // clear the bit.
     uint64_t old_bits = pp->inuse_bitmap[objnum / 64];
-    bassert( old_bits & ( 1ul << ( objnum % 64 ) ) );
-    pp->inuse_bitmap[objnum / 64] = old_bits & ~( 1ul << ( objnum % 64 ) );
+    bassert( old_bits & ( 1ull << ( objnum % 64 ) ) );
+    pp->inuse_bitmap[objnum / 64] = old_bits & ~( 1ull << ( objnum % 64 ) );
     if( IS_TESTING ) bassert( old_count > 0 && old_count <= o_per_folio );
 
     uint32_t old_offset_within = o_per_folio - old_count;
@@ -549,7 +555,12 @@ small_free( void* p )
         // of it.)
         bassert( madvise_me == pp );
         uint64_t madvise_address = ( chunk_num * chunksize ) + wasted_offset + folio_num * folio_size;
+#if defined( __linux__ )
         madvise( reinterpret_cast<void*>( madvise_address ), folio_size, MADV_DONTNEED );
+#elif defined( _WIN64 )
+        win32_madvise( reinterpret_cast<void*>( madvise_address ), folio_size, MADV_DONTNEED );
+#endif
+
         // Now put it back into the list.
         // Doing this will not change the fullest offset, since this is fully empty.
         // Cannot quite do this with a compare-and-swap since we have to update dsbi.lists[new_offset] as well as the prev pointer

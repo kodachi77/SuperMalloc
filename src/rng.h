@@ -14,4 +14,4 @@ extern "C"
 }
 #endif
 
-#endif
+#endif /* RNG_H */

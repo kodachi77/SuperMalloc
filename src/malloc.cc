@@ -1,7 +1,10 @@
 #include "supermalloc.h"
 
+#ifdef __linux__
 #include <dlfcn.h>
 #include <sys/mman.h>
+#endif
+
 #include <algorithm>
 #include <cerrno>
 #include <cstddef>
@@ -16,7 +19,8 @@
 #include "bassert.h"
 #include "cpucores.h"
 #include "generated_constants.h"
-#include "has_tsx.h"
+
+#define PREFIX super_
 
 #ifndef PREFIX
 #define PREFIXIFY( f ) f
@@ -84,8 +88,8 @@ uint32_t n_cores;
 #ifdef DO_FAILED_COUNTS
 atomic_stats_s atomic_stats;
 
-lock_t                 failed_counts_mutex = LOCK_INITIALIZER;
-int                    failed_counts_n     = 0;
+lock_t                 LOCK_INITIALIZER( failed_counts_mutex );
+int                    failed_counts_n = 0;
 struct failed_counts_s failed_counts[max_failed_counts];
 
 int
@@ -130,13 +134,36 @@ check_log()
 }
 #endif
 
-bool use_transactions = true;
-bool do_predo         = true;
-bool use_threadcache  = true;
+bool do_predo        = true;
+bool use_threadcache = true;
 
 static void ( *free_p )( void* );
 
-bool has_tsx;
+
+static bool
+__SetLockPagesPrivilege()
+{
+#if defined( _WIN64 )
+    HANDLE token;
+    if( !OpenProcessToken( GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token ) ) { return false; }
+    TOKEN_PRIVILEGES tp;
+    tp.PrivilegeCount           = 1;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    if( !LookupPrivilegeValue( NULL, SE_LOCK_MEMORY_NAME, &( tp.Privileges[0].Luid ) ) )
+    {
+        CloseHandle( token );
+        return false;
+    }
+    BOOL rc = AdjustTokenPrivileges( token, FALSE, (PTOKEN_PRIVILEGES) &tp, 0, NULL, NULL );
+    if( !rc || GetLastError() != ERROR_SUCCESS )
+    {
+        CloseHandle( token );
+        return false;
+    }
+    CloseHandle( token );
+#endif
+    return true;
+}
 
 #ifndef TESTING
 static
@@ -161,9 +188,12 @@ extern "C"
     //  atexit(check_log);
     //#endif
 
-    has_tsx = have_TSX();
+    if( !__SetLockPagesPrivilege() )
+	{
+		// TODO: write error message.
+	}
 
-    const size_t n_elts     = 1u << 27;
+    const size_t n_elts     = 1ull << 27;
     const size_t alloc_size = n_elts * sizeof( chunk_info );
     const size_t n_chunks   = ceil( alloc_size, chunksize );
     chunk_infos             = (chunk_info*) mmap_chunk_aligned_block( n_chunks );
@@ -171,6 +201,7 @@ extern "C"
 
     n_cores = cpucores();
 
+#if defined( __linux__ )
     {
         char* v = getenv( "SUPERMALLOC_TRANSACTIONS" );
         if( v )
@@ -181,8 +212,8 @@ extern "C"
                 use_transactions = true;
             }
         }
-    }
-    {
+    } 
+	{
         char* v = getenv( "SUPERMALLOC_PREDO" );
         if( v )
         {
@@ -205,7 +236,10 @@ extern "C"
         }
     }
 
-    free_p = ( void ( * )( void* ) )( dlsym( RTLD_NEXT, "free" ) );
+    free_p = (void ( * )( void* )) ( dlsym( RTLD_NEXT, "free" ) );
+#elif defined( _WIN64 )
+    // do nothing
+#endif
 }
 
 void
@@ -249,9 +283,9 @@ test_hyperceil( void )
     test_hyperceil_v( 5, 8 );
     for( int i = 3; i < 27; i++ )
     {
-        test_hyperceil_v( ( 1u << i ) + 0, ( 1u << i ) );
-        test_hyperceil_v( ( 1u << i ) - 1, ( 1u << i ) );
-        test_hyperceil_v( ( 1u << i ) + 1, 2 * ( 1u << i ) );
+        test_hyperceil_v( ( 1ull << i ) + 0, ( 1ull << i ) );
+        test_hyperceil_v( ( 1ull << i ) - 1, ( 1ull << i ) );
+        test_hyperceil_v( ( 1ull << i ) + 1, 2 * ( 1ull << i ) );
     }
 }
 #endif
@@ -414,7 +448,11 @@ CALLOC( size_t number, size_t size )
     else
     {
         // everything is page aligned.
+#if defined( __linux__ )
         madvise( base, usable_from_base, MADV_DONTNEED );
+#elif defined( _WIN64 )
+        win32_madvise( base, usable_from_base, MADV_DONTNEED );
+#endif
     }
     return result;
 }
@@ -548,9 +586,9 @@ MALLOC_USABLE_SIZE( const void* ptr )
     const char* base = reinterpret_cast<const char*>( object_base( const_cast<void*>( ptr ) ) );
     bassert( address_2_chunknumber( base ) == cn );
     const char* ptr_c     = reinterpret_cast<const char*>( ptr );
-    ssize_t     base_size = bin_2_size( bin );
+    size_t      base_size = bin_2_size( bin );
     bassert( base <= ptr );
-    bassert( base_size >= ptr_c - base );
+    bassert( base_size >= ptrdiff_t( ptr_c - base ) );
     return base_size - ( ptr_c - base );
 }
 

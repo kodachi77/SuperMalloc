@@ -9,9 +9,11 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "config.h"
+
 const uint64_t pagesize            = 4096;
 const uint64_t log_chunksize       = 21;
-const uint64_t chunksize           = 1ul << log_chunksize;
+const uint64_t chunksize           = 1ull << log_chunksize;
 const uint64_t cacheline_size      = 64;
 const uint64_t cachelines_per_page = pagesize / cacheline_size;
 
@@ -41,9 +43,9 @@ static inline uint64_t
 hyperceil( uint64_t a )
 // Effect: Return the smallest power of two >= a.
 {
-    uint64_t r = ( ( a <= 1 ) ? 1 : 1ul << ( 64 - __builtin_clzl( a - 1 ) ) );
+    uint64_t r = ( ( a <= 1 ) ? 1 : 1ull << ( 64 - __builtin_clzl( a - 1 ) ) );
 #ifdef TESTING
-    if( 0 ) printf( "hyperceil(%ld)==%ld\n", a, r );
+    if( 0 ) printf( "hyperceil(%" PRIu64 ")==%" PRIu64 "\n", a, r );
 #endif
     return r;
 }
@@ -64,7 +66,7 @@ address_2_chunknumber( const void* a )
     // Given an address anywhere in a chunk, convert it to a chunk number from 0 to 1<<27
     uint64_t au     = reinterpret_cast<uint64_t>( a );
     uint64_t am     = au / chunksize;
-    uint64_t result = am % ( 1ul << 27 );
+    uint64_t result = am % ( 1ull << 27 );
     return result;
 }
 
@@ -109,7 +111,8 @@ void* object_base( void* ptr );
 
 extern struct chunk_info
 {
-    union {
+    union
+    {
         bin_and_size_t bin_and_size;
         chunknumber_t  next;    // Forms a linked list.
     };
@@ -165,12 +168,10 @@ static inline void
 print_bin_stats()
 {
 }
-static inline void
-bin_stats_note_malloc( binnumber_t b __attribute__( ( unused ) ) )
+static inline void bin_stats_note_malloc( binnumber_t /*b*/ )
 {
 }
-static inline void
-bin_stats_note_free( binnumber_t b __attribute__( ( unused ) ) )
+static inline void bin_stats_note_free( binnumber_t /*b*/ )
 {
 }
 #endif
@@ -187,7 +188,8 @@ void check_log_large();
 
 struct large_object_list_cell
 {
-    union {
+    union
+    {
         large_object_list_cell* next;
         uint32_t                footprint;
     };
@@ -199,7 +201,7 @@ const uint32_t folio_bitmap_n_words = max_objects_per_folio / 64;
 
 struct per_folio
 {
-    per_folio* next __attribute__( ( aligned( 64 ) ) );
+    ATTRIBUTE_ALIGNED( 64 ) per_folio* next;
     per_folio* prev;
     uint64_t   inuse_bitmap
         [folio_bitmap_n_words];    // up to 512 objects (8 bytes per object) per page.  The bit is set if the object is in use.

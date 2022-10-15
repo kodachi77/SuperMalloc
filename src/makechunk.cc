@@ -1,6 +1,11 @@
 #include <errno.h>
 #include <stdlib.h>
+#ifdef __linux__
 #include <sys/mman.h>
+#endif
+#ifdef _WIN64
+#include "config.h"
+#endif
 
 #include "bassert.h"
 #include "generated_constants.h"
@@ -18,6 +23,7 @@ static size_t mismapped_so_unmapped = 0;
 void*
 mmap_size( size_t size )
 {
+#ifdef __linux__
     void* r = mmap( NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0 );
     if( r == MAP_FAILED )
     {
@@ -36,12 +42,26 @@ mmap_size( size_t size )
         perror( "Map failed" );
     }
     bassert( r != MAP_FAILED );
+#elif defined( _WIN64 )
+    DWORD flag = 0;
+    // FIXME: if( size > ::GetLargePageMinimum() ) flag |= MEM_LARGE_PAGES; /* this causes some issues in madvise */
+    void* r = ::VirtualAlloc( NULL, size, flag | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    if( !r )
+    {
+        fprintf( stderr, " VirtualAlloc failed. Error = %d\n", GetLastError() );
+        return NULL;
+    }
+
+    __sync_fetch_and_add( &total_mapped, size );
+
+#endif
     return r;
 }
 
 static void
 unmap( void* p, size_t size )
 {
+#ifdef __linux__
     if( size > 0 )
     {
         int r = munmap( p, size );
@@ -53,6 +73,26 @@ unmap( void* p, size_t size )
         bassert( r == 0 );
         __sync_fetch_and_add( &mismapped_so_unmapped, size );
     }
+#elif defined( _WIN64 )
+    if( size > 0 )
+    {
+        MEMORY_BASIC_INFORMATION minfo;
+        char*                    cptr = (char*) p;
+        while( size )
+        {
+            if( VirtualQuery( cptr, &minfo, sizeof( minfo ) ) == 0 ) return;
+            if( minfo.BaseAddress != cptr || minfo.AllocationBase != cptr || minfo.State != MEM_COMMIT
+                || minfo.RegionSize > size )
+                return;
+
+            if( VirtualFree( cptr, 0, MEM_RELEASE ) == 0 ) return;
+            cptr += minfo.RegionSize;
+            size -= minfo.RegionSize;
+        }
+
+        __sync_fetch_and_add( &mismapped_so_unmapped, size );
+    }
+#endif
 }
 
 static void*

@@ -1,4 +1,5 @@
-#include <time.h>
+#ifndef UNITTESTS_H
+#define UNITTESTS_H
 
 #ifdef __cplusplus
 extern "C"
@@ -16,8 +17,10 @@ extern "C"
     void test_realloc( void );
     void test_malloc_usable_size( void );
     void test_object_base( void );
-
     void time_small_malloc( void );
+
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* UNITTESTS_H */

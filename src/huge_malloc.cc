@@ -1,4 +1,6 @@
+#ifdef __linux__
 #include <sys/mman.h>
+#endif
 #include <algorithm>
 
 #ifdef TESTING
@@ -10,7 +12,7 @@
 #include "generated_constants.h"
 #include "malloc_internal.h"
 
-static lock_t huge_lock = LOCK_INITIALIZER;
+static lock_t huge_lock;
 
 // free_chunks[0] is a list of 1-chunk objects (which are, by definition chunk-aligned)
 // free_chunks[1] is a list of 2-chunk objects which are also 2-chunk aligned (that is 4MiB-aligned).
@@ -117,25 +119,39 @@ void*
 huge_malloc( size_t size )
 {
     // allocates something out of the hyperceil(size) bin, which is also hyperceil(size)-aligned.
-    chunknumber_t n_chunks = std::max( 1ul, hyperceil( size ) / chunksize );    // at least one chunk always
-    void*         c        = get_power_of_two_n_chunks( n_chunks );
+    chunknumber_t n_chunks =
+        static_cast<uint32_t>( std::max<uint64_t>( 1ull, hyperceil( size ) / chunksize ) );    // at least one chunk always
+    void* c = get_power_of_two_n_chunks( n_chunks );
     if( c == NULL ) return NULL;
+
+#if defined( __linux__ )
     madvise( c, n_chunks * chunksize, MADV_DONTNEED );
+#elif defined( _WIN64 )
+    win32_madvise( c, n_chunks * chunksize, MADV_DONTNEED );
+#endif
     size_t n_whole_chunks = size / chunksize;
     size_t n_bytes_at_end = size - n_whole_chunks * chunksize;
     if( n_bytes_at_end == 0 || ( chunksize - n_bytes_at_end < chunksize / 8 ) )
     {
         // The unused part at the end is either empty, or it's pretty big, so we'll just map it all as huge pages.
+#if defined( __linux__ )
         madvise(
             c, n_chunks * chunksize,
             MADV_HUGEPAGE );    // ignore any error code.  In future skip this call if we always get an error?  Also if we are in madvise=always we shouldn't bother.
+#elif defined( _WIN64 )
+        // TODO: Implement on Windows
+#endif
     }
     else
     {
         // n_bytes_at_end != 0 and
         // The unused part is smallish, so we'll use no-huge pages for it.
+#if defined( __linux__ )
         if( n_whole_chunks > 0 ) { madvise( c, n_whole_chunks * chunksize, MADV_HUGEPAGE ); }
         madvise( reinterpret_cast<char*>( c ) + n_whole_chunks * chunksize, n_bytes_at_end, MADV_NOHUGEPAGE );
+#elif defined( _WIN64 )
+        // TODO: Implement on Windows
+#endif
     }
     chunknumber_t  chunknum = address_2_chunknumber( c );
     binnumber_t    bin      = size_2_bin( n_chunks * chunksize );
@@ -163,8 +179,13 @@ huge_free( void* m )
     uint32_t      hlog  = lg_of_power_of_two( hceil );
     bassert( hlog < log_max_chunknumber );
     {
+#if defined( __linux__ )
         int r = madvise( m, siz, MADV_DONTNEED );
         bassert( r == 0 );    // Should we really check this?
+#elif defined( _WIN64 )
+        int r = win32_madvise( m, siz, MADV_DONTNEED );
+        bassert( r == 0 );
+#endif
     }
     put_cached_power_of_two_chunks( cn, hlog );
 }
@@ -190,14 +211,14 @@ test_huge_malloc( void )
     void* b = huge_malloc( largest_large + 2 );
     bassert( offset_in_chunk( b ) == 0 );
     chunknumber_t b_n = address_2_chunknumber( b );
-    if( print ) printf( "b=%p diff=0x%lx a_n-b_n=%d\n", b, (char*) a - (char*) b, (int) a_n - (int) b_n );
+    if( print ) printf( "b=%p diff=0x%llx a_n-b_n=%d\n", b, (char*) a - (char*) b, (int) a_n - (int) b_n );
     bassert( bin_from_bin_and_size( chunk_infos[b_n].bin_and_size ) == first_huge_bin_number );
 
     void* c = huge_malloc( 2 * chunksize );
     bassert( offset_in_chunk( c ) == 0 );
     chunknumber_t c_n = address_2_chunknumber( c );
     if( print )
-        printf( "c=%p diff=0x%lx bin = %u,%u b_n=%d c_n=%d\n", c, (char*) b - (char*) c,
+        printf( "c=%p diff=0x%llx bin = %u,%u b_n=%d c_n=%d\n", c, (char*) b - (char*) c,
                 bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ), chunk_infos[c_n].bin_and_size >> 7, b_n, c_n );
     bassert( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 
@@ -208,23 +229,23 @@ test_huge_malloc( void )
     bassert( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 
     // Now make sure that a, b, c, d are allocated with no overlaps.
-    bassert( abs( a_n - b_n ) >= 1 );    // a and b must be separated by 1
-    bassert( abs( a_n - c_n ) >= 2 );    // a and c must be separated by 2
-    bassert( abs( a_n - d_n ) >= 2 );    // a and d must be separated by 2
-    bassert( abs( b_n - c_n ) >= 2 );    // b and c must be separated by 2
-    bassert( abs( b_n - d_n ) >= 2 );    // a and d must be separated by 2
-    bassert( abs( c_n - d_n ) >= 2 );    // c and d must be separated by 2
+    bassert( abs( long( a_n - b_n ) ) >= 1 );    // a and b must be separated by 1
+    bassert( abs( long( a_n - c_n ) ) >= 2 );    // a and c must be separated by 2
+    bassert( abs( long( a_n - d_n ) ) >= 2 );    // a and d must be separated by 2
+    bassert( abs( long( b_n - c_n ) ) >= 2 );    // b and c must be separated by 2
+    bassert( abs( long( b_n - d_n ) ) >= 2 );    // a and d must be separated by 2
+    bassert( abs( long( c_n - d_n ) ) >= 2 );    // c and d must be separated by 2
 
     {
-        chunknumber_t m1_n = address_2_chunknumber( reinterpret_cast<void*>( -1ul ) );
-        if( print ) printf( "-1 ==> 0x%x (1<<27)-1=%lx\n", m1_n, ( 1ul << 26 ) - 1 );
-        bassert( m1_n == ( 1ul << 27 ) - 1 );
+        chunknumber_t m1_n = address_2_chunknumber( reinterpret_cast<void*>( -1 ) );
+        if( print ) printf( "-1 ==> 0x%x (1<<27)-1=%llx\n", m1_n, ( 1ull << 26 ) - 1 );
+        bassert( m1_n == ( 1ull << 27 ) - 1 );
         if( print ) printf( "-1 ==> 0x%x\n", m1_n );
     }
 
     {
         chunknumber_t zero_n = address_2_chunknumber( reinterpret_cast<void*>( 0 ) );
-        if( print ) printf( "0 ==> 0x%x (1<<27)-1=%lx\n", zero_n, ( 1ul << 26 ) - 1 );
+        if( print ) printf( "0 ==> 0x%x (1<<27)-1=%llx\n", zero_n, ( 1ull << 26 ) - 1 );
         bassert( zero_n == 0 );
         if( print ) printf( "-1 ==> 0x%x\n", zero_n );
     }

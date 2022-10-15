@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+
 #include "bassert.h"
 
 #include <algorithm>
@@ -75,7 +76,7 @@ calculate_multiply_magic( uint64_t d )
     }
     else
     {
-        return ( d - 1 + ( 1ul << calculate_shift_magic( d ) ) ) / d;
+        return ( d - 1 + uint64_t( 1ull << calculate_shift_magic( d ) ) ) / d;
     }
 }
 
@@ -115,21 +116,21 @@ void
 print_number( FILE* f, uint64_t n, int len )
 {
     if( n <= 1024 || ( n % 1024 ) )
-        fprintf( f, "%*lu", len, n );
+        fprintf( f, "%*" PRIu64, len, n );
     else if( n < 1024 * 1024 || ( n % ( 1024 * 1024 ) ) )
-        fprintf( f, "%*lu*Ki", std::max( 1, len - 3 ), n / 1024 );
+        fprintf( f, "%*" PRIu64 "*Ki", std::max( 1, len - 3 ), n / 1024 );
     else if( is_power_of_two( n ) )
-        fprintf( f, "1ul<<%*d", std::max( 1, len - 5 ), lg_of_power_of_two( n ) );
+        fprintf( f, "1ull<<%*d", std::max( 1, len - 5 ), lg_of_power_of_two( n ) );
     else
-        fprintf( f, "%*lu*Me", std::max( 1, len - 3 ), n / ( 1024 * 1024 ) );
+        fprintf( f, "%*" PRIu64 "*Me", std::max( 1, len - 3 ), n / ( 1024 * 1024 ) );
 }
 
 #if 0
 void print_number_maybe_power_of_two(FILE *f, uint64_t n) {
   if (n > 8 && is_power_of_two(n)) {
-    fprintf(f, "1ul<<%3d", lg_of_power_of_two(n));
+    fprintf(f, "1ull<<%3d", lg_of_power_of_two(n));
   } else {
-    fprintf(f, "%8lu", n);
+    fprin  tf(f, "%8lu", n);
   }
 }
 #endif
@@ -185,7 +186,7 @@ class static_bin_t
         print_number( f, foliosize, 10 );
         fprintf( f,
                  ",              %4u,              %3u,                       %2u,                  %2u,          %2u,    "
-                 "%10lulu,   %10lulu},  // %3d",
+                 "%10" PRIu64 "ull,   %10" PRIu64 "ull},  // %3d",
                  objects_per_folio, folios_per_chunk, overhead_pages_per_chunk, object_division_shift_magic,
                  folio_division_shift_magic, object_division_multiply_magic, folio_division_multiply_magic, bin );
     }
@@ -194,6 +195,7 @@ class static_bin_t
 int
 main( int argc, const char* argv[] )
 {
+    // objsizes.exe generated_constants.cc > generated_constants.h
     bassert( argc == 2 );
     FILE* cf = fopen( argv[1], "w" );
     bassert( cf );
@@ -205,6 +207,7 @@ main( int argc, const char* argv[] )
     printf( "//  from %s\n\n", __FILE__ );
     fprintf( cf, "#include \"malloc_internal.h\"\n" );
     printf( "#include \"malloc_internal.h\"\n" );
+    printf( "#include \"config.h\"\n" );
     printf( "#include <stdlib.h>\n" );
     printf( "#include <stdint.h>\n" );
     printf( "#include <sys/types.h>\n" );
@@ -234,7 +237,7 @@ main( int argc, const char* argv[] )
         "folios_per_chunk;  uint8_t overhead_pages_per_chunk, object_division_shift_magic, folio_division_shift_magic; uint64_t "
         "object_division_multiply_magic, folio_division_multiply_magic;}";
     printf( "extern const %s static_bin_info[];\n", struct_definition );
-    fprintf( cf, "const struct static_bin_s static_bin_info[] __attribute__((aligned(64))) = {\n" );
+    fprintf( cf, "ATTRIBUTE_ALIGNED( 64 ) const struct static_bin_s static_bin_info[] = {\n" );
     fprintf( cf, "// The first class of small objects try to get a maximum of 25%% internal fragmentation by having sizes of the "
                  "form c<<k where c is 4, 5, 6 or 7.\n" );
     fprintf( cf, "// We stop at when we have 4 cachelines, so that the ones that happen to be multiples of cache lines are "
@@ -257,7 +260,9 @@ main( int argc, const char* argv[] )
             b.print( cf, bin++ );
             fprintf( cf, "    %3.1f%%", wasted * 100.0 );
             if( objsize == 8 || ( is_power_of_two( objsize ) && objsize > cacheline_size ) )
-            { fprintf( cf, "       %4.1f%%\n", wasted * 100.0 ); }
+            {
+                fprintf( cf, "       %4.1f%%\n", wasted * 100.0 );
+            }
             else
             {
                 double bin_wastage    = ( objsize - prev_non_aligned_size - 1 ) / (double) objsize;
@@ -333,14 +338,14 @@ done_small:
     int first_large_bin = bin;
     for( uint64_t log_allocsize = 14; log_allocsize < log_chunksize; log_allocsize++ )
     {
-        uint64_t    objsize = 1u << log_allocsize;
+        uint64_t    objsize = 1ull << log_allocsize;
         const char* comment = "";
         if( log_allocsize > largest_waste_at_end )
         {
             objsize -= pagesize;
             comment = " (reserve a page for the list of sizes)";
         }
-        struct static_bin_t b( BIN_LARGE, objsize );
+        class static_bin_t b( BIN_LARGE, objsize );
         b.print( cf, bin++ );
         fprintf( cf, " %s\n", comment );
         static_bins.push_back( b );
@@ -348,30 +353,31 @@ done_small:
                  <= offset_of_first_object_in_large_chunk );
     }
     binnumber_t first_huge_bin = bin;
-    fprintf( cf, "// huge objects (chunk allocated) start  at this size.\n" );
-    for( uint64_t siz = chunksize; siz < ( 1ul << 48 ); siz *= 2 )
+    fprintf( cf, "// huge objects (chunk allocated) start  at this size. %" PRIu64 "\n", chunksize );
+    for( uint64_t siz = chunksize; siz < 281474976710656; siz *= 2 ) // ( 1ull << 48 )
     {
-        struct static_bin_t b( BIN_HUGE, siz );
+        class static_bin_t b( BIN_HUGE, siz );
         b.print( cf, bin++ );
         fprintf( cf, "\n" );
     }
     fprintf( cf, "\n};\n" );
     printf( "static const binnumber_t bin_number_limit = %u;\n", bin );
-    printf( "static const size_t largest_small         = %lu;\n", largest_small );
-    const size_t largest_large = ( 1ul << ( log_chunksize - 1 ) ) - pagesize;
-    printf( "static const uint64_t offset_of_first_object_in_large_chunk = %lu;\n", offset_of_first_object_in_large_chunk );
-    printf( "static const size_t largest_large         = %lu;\n", largest_large );
+    printf( "static const size_t largest_small         = %" PRIu64 ";\n", largest_small );
+    const size_t largest_large = ( 1ull << ( log_chunksize - 1 ) ) - pagesize;
+    printf( "static const uint64_t offset_of_first_object_in_large_chunk = %" PRIu64 ";\n",
+            offset_of_first_object_in_large_chunk );
+    printf( "static const size_t largest_large         = %" PRIu64 ";\n", largest_large );
     printf( "static const binnumber_t first_large_bin_number = %u;\n", first_large_bin );
     printf( "static const binnumber_t first_huge_bin_number   = %u;\n", first_huge_bin );
     //  printf("static const uint64_t    slot_size               = %u;\n", slot_size);
 
-    printf( "#define REPEAT_FOR_SMALL_BINS(x) " );
-    for( int b = 0; b < first_large_bin; b++ )
-    {
-        if( b > 0 ) printf( "," );
-        printf( "x" );
-    }
-    printf( "\n" );
+    //printf( "#define REPEAT_FOR_SMALL_BINS(x) " );
+    //for( int b = 0; b < first_large_bin; b++ )
+    //{
+    //    if( b > 0 ) printf( "," );
+    //    printf( "x" );
+    //}
+    //printf( "\n" );
 
     printf( "struct per_folio; // Forward decl needed here.\n" );
     printf( "struct dynamic_small_bin_info {\n" );
@@ -396,8 +402,8 @@ done_small:
     printf( "};\n" );
     printf( "// dynamic_small_bin_offset is declared const even though one implementation looks in an array.  The array is a "
             "const\n" );
-    printf( "static uint32_t dynamic_small_bin_offset(binnumber_t bin) __attribute((const)) __attribute__((unused)) "
-            "__attribute__((warn_unused_result));\n" );
+    printf(
+        "static uint32_t dynamic_small_bin_offset(binnumber_t bin) ATTRIBUTE_CONST ATTRIBUTE_UNUSED ATTRIBUTE_UNUSED_RESULT;\n" );
     printf( "static uint32_t dynamic_small_bin_offset(binnumber_t bin) {\n" );
     printf( "  if (0) {\n" );
     printf( "    switch(bin) {\n" );
@@ -427,7 +433,7 @@ done_small:
     printf( "  }\n" );
     printf( "}\n" );
 
-    printf( "static binnumber_t size_2_bin(size_t size) __attribute((unused)) __attribute((const));\n" );
+    printf( "static binnumber_t size_2_bin(size_t size) ATTRIBUTE_CONST ATTRIBUTE_UNUSED;\n" );
     printf( "static binnumber_t size_2_bin(size_t size) {\n" );
     printf( "  if (size <= 8) return 0;\n" );
     printf( "  if (size <= 320) {\n" );
@@ -440,14 +446,15 @@ done_small:
     for( binnumber_t b = 0; b < first_huge_bin; b++ )
     {
         if( static_bins[b].object_size <= 320 ) printf( "  //" );
-        printf( "  if (size <= %lu) return %d;\n", static_bins[b].object_size, b );
+        printf( "  if (size <= %" PRIu64 ") return %d;\n", static_bins[b].object_size, b );
     }
-    printf( "  if (size <= %lu) return %d; // Special case to handle the values between the largest_large and chunksize/2\n",
+    printf( "  if (size <= %" PRIu64
+            ") return %d; // Special case to handle the values between the largest_large and chunksize/2\n",
             chunksize, first_huge_bin );
     printf( "  return %u + lg_of_power_of_two(hyperceil(size)) - log_chunksize;\n", first_huge_bin );
     printf( "}\n" );
 
-    printf( "static size_t bin_2_size(binnumber_t bin) __attribute((unused)) __attribute((const));\n" );
+    printf( "static size_t bin_2_size(binnumber_t bin) ATTRIBUTE_CONST ATTRIBUTE_UNUSED;\n" );
     printf( "static size_t bin_2_size(binnumber_t bin) {\n" );
     printf( "  bassert(bin < bin_number_limit);\n" );
     printf( "  return static_bin_info[bin].object_size;\n" );
@@ -455,11 +462,13 @@ done_small:
 
     if( 0 )
     {
-        printf( "static uint32_t divide_by_o_size(uint32_t n, binnumber_t bin)  __attribute((unused)) __attribute((const));\n" );
+        printf( "static uint32_t divide_by_o_size(uint32_t n, binnumber_t bin)  ATTRIBUTE_CONST ATTRIBUTE_UNUSED;\n" );
         printf( "static uint32_t divide_by_o_size(uint32_t n, binnumber_t bin) {\n" );
         printf( "  switch (bin) {\n" );
         for( binnumber_t b = 0; b < first_huge_bin; b++ )
-        { printf( "    case %u: return n/%lu;\n", b, static_bins[b].object_size ); }
+        {
+            printf( "    case %u: return n/%" PRIu64 ";\n", b, static_bins[b].object_size );
+        }
         printf( "    default: abort();\n" );
         printf( "  }\n" );
         printf( "}\n" );

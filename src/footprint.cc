@@ -1,9 +1,13 @@
 /* Maintain a count of the footprint. */
 
+#ifdef __linux__
 #include <sched.h>
+#endif
 
 #include "atomically.h"
 #include "malloc_internal.h"
+
+#include "config.h"
 
 static const int processor_number_limit = 128;    // should be enough for now.
 static uint64_t  partitioned_footprint[processor_number_limit];
@@ -12,10 +16,10 @@ struct processor_id
 {
     int cpuid;
     int count;
-} __attribute__( ( aligned( 64 ) ) );
+} ATTRIBUTE_ALIGNED( 64 );
 
-static const int             prid_cache_time = 128;
-static __thread processor_id prid;
+static const int                     prid_cache_time = 128;
+static ATTRIBUTE_THREAD processor_id prid;
 
 static inline void
 check_cpuid( void )

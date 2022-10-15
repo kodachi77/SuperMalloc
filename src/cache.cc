@@ -37,7 +37,7 @@ int getcpu(void) {
 }
 
 #elif 1
-static __thread uint32_t cached_cpu, cached_cpu_count;
+static ATTRIBUTE_THREAD uint32_t cached_cpu = 0, cached_cpu_count = 0;
 static uint32_t
 getcpu( void )
 {
@@ -63,18 +63,18 @@ struct linked_list
 
 struct cached_objects
 {
-    uint64_t     bytecount __attribute__( ( aligned( 32 ) ) );
+    ATTRIBUTE_ALIGNED( 32 ) uint64_t bytecount;
     linked_list* head;
     linked_list* tail;
 };
 
-static const cached_objects empty_cached_objects = {0, NULL, NULL};
+static const cached_objects empty_cached_objects = { 0, NULL, NULL };
 
 struct CacheForBin
 {
     cached_objects co[2];
-} __attribute__( ( aligned(
-    64 ) ) );    // it's OK if the cached objects are on the same cacheline as the lock, but we don't want the cached objects to cross a cache boundary.  Since the CacheForBin has gotten to be 48 bytes, we might as well just align the struct to the cache.
+} ATTRIBUTE_ALIGNED( 64 );
+// it's OK if the cached objects are on the same cacheline as the lock, but we don't want the cached objects to cross a cache boundary.  Since the CacheForBin has gotten to be 48 bytes, we might as well just align the struct to the cache.
 
 struct CacheForCpu
 {
@@ -82,13 +82,18 @@ struct CacheForCpu
     uint64_t attempt_count, success_count;
 #endif
     CacheForBin cb[first_huge_bin_number];
-} __attribute__( ( aligned( 64 ) ) );
+} ATTRIBUTE_ALIGNED( 64 );
 
-static __thread CacheForCpu cache_for_thread;
+static ATTRIBUTE_THREAD CacheForCpu cache_for_thread = {};
 
-static __thread bool  cache_inited = false;
+static ATTRIBUTE_THREAD bool cache_inited = false;
+#if defined( __linux__ )
 static pthread_key_t  key;
 static pthread_once_t once_control = PTHREAD_ONCE_INIT;
+#elif defined( _WIN64 )
+static INIT_ONCE once_control = INIT_ONCE_STATIC_INIT;
+#endif
+
 void
 cache_destructor( void* v )
 {
@@ -113,30 +118,67 @@ cache_destructor( void* v )
     }
     //printf("recovered %ld\n", recovered);
 }
+
+#if defined( __linux__ )
 static void
 make_key()
 {
     pthread_key_create( &key, cache_destructor );
 }
+#elif defined( _WIN64 )
+BOOL CALLBACK
+make_key( PINIT_ONCE InitOnce,     // Pointer to one-time initialization structure
+          PVOID      Parameter,    // Optional parameter passed by InitOnceExecuteOnce
+          PVOID*     lpContext )
+{
+    // TODO: do we need to do anything here?
+    return TRUE;
+}
+#endif
 
 void
 init_cache()
 {
+#if defined( __linux__ )
     if( !cache_inited )
     {
         cache_inited = true;
         pthread_once( &once_control, make_key );
     }
     pthread_setspecific( key, &cache_inited );
+#elif defined( _WIN64 )
+    PVOID lpContext;
+    if( !cache_inited )
+    {
+        cache_inited = true;
+        InitOnceExecuteOnce( &once_control, make_key, NULL, &lpContext );
+    }
+#endif
 }
 
-static CacheForCpu cache_for_cpu[cpulimit];
+#if defined( _WIN64 )
+static void NTAPI
+on_tls_callback( PVOID /*h*/, DWORD reason, PVOID /*pv*/ )
+{
+    if( reason == DLL_PROCESS_DETACH || reason == DLL_THREAD_DETACH ) { cache_destructor( &cache_inited ); }
+}
+
+#pragma comment( linker, "/INCLUDE:p_thread_callback_super_malloc" )
+#pragma const_seg( ".CRT$XLL" )
+extern "C" const PIMAGE_TLS_CALLBACK p_thread_callback_super_malloc = on_tls_callback;
+#pragma const_seg()
+
+#define init_pthread_destructor()
+
+#endif
+
+static CacheForCpu cache_for_cpu[cpulimit] = {};
 
 static const int global_cache_depth = 8;
 
 struct GlobalCacheForBin
 {
-    uint8_t        n_nonempty_caches __attribute__( ( aligned( 64 ) ) );
+    ATTRIBUTE_ALIGNED( 64 ) uint8_t n_nonempty_caches;
     cached_objects co[global_cache_depth];
 };
 
@@ -145,14 +187,14 @@ struct GlobalCache
     GlobalCacheForBin gb[first_huge_bin_number];
 };
 
-static GlobalCache global_cache;
+static GlobalCache global_cache = {};
 
 static const uint64_t per_cpu_cache_bytecount_limit = 1024 * 1024;
 static const uint64_t thread_cache_bytecount_limit  = 2 * 4096;
 
-lock_t cpu_cache_locks
-    [cpulimit][first_huge_bin_number];    // these locks could less aligned, as long as the the first one for each cpu is aligned.
-lock_t global_cache_locks[first_huge_bin_number];
+lock_t cpu_cache_locks[cpulimit][first_huge_bin_number] =
+    {};    // these locks could less aligned, as long as the the first one for each cpu is aligned.
+lock_t global_cache_locks[first_huge_bin_number] = {};
 
 static void*
 try_get_cached( cached_objects* co, uint64_t siz )
@@ -187,14 +229,14 @@ static void
 test_try_get_cached_both()
 {
     {
-        CacheForBin c = {{{0, NULL, NULL}, {0, NULL, NULL}}};
+        CacheForBin c = { { { 0, NULL, NULL }, { 0, NULL, NULL } } };
         void*       r = try_get_cached_both( &c, 1024 );
         bassert( r == NULL );
     }
     {
-        linked_list item1 = {NULL};
-        linked_list item2 = {&item1};
-        CacheForBin c     = {{{2048, &item2, &item1}, {0, NULL, NULL}}};
+        linked_list item1 = { NULL };
+        linked_list item2 = { &item1 };
+        CacheForBin c     = { { { 2048, &item2, &item1 }, { 0, NULL, NULL } } };
         void*       r     = try_get_cached_both( &c, 1024 );
         bassert( r = reinterpret_cast<void*>( &item2 ) );
         assert_equal( &c.co[0], 1024, &item1, &item1 );
@@ -205,9 +247,9 @@ test_try_get_cached_both()
         assert_equal( &c.co[1], 0, NULL, NULL );
     }
     {
-        linked_list item1 = {NULL};
-        linked_list item2 = {&item1};
-        CacheForBin c     = {{{0, NULL, NULL}, {2048, &item2, &item1}}};
+        linked_list item1 = { NULL };
+        linked_list item2 = { &item1 };
+        CacheForBin c     = { { { 0, NULL, NULL }, { 2048, &item2, &item1 } } };
         void*       r     = try_get_cached_both( &c, 1024 );
         bassert( r = reinterpret_cast<void*>( &item2 ) );
         assert_equal( &c.co[1], 1024, &item1, &item1 );
@@ -251,10 +293,10 @@ do_remove_a_cache_from_cpu( CacheForBin* cc, cached_objects* co )
 static void
 test_remove_a_cache_from_cpu()
 {
-    linked_list    item1 = {NULL};
-    linked_list    item2 = {NULL};
-    CacheForBin    c     = {{{1024, &item1, &item1}, {1024, &item2, &item2}}};
-    cached_objects co    = {0, NULL, NULL};
+    linked_list    item1 = { NULL };
+    linked_list    item2 = { NULL };
+    CacheForBin    c     = { { { 1024, &item1, &item1 }, { 1024, &item2, &item2 } } };
+    cached_objects co    = { 0, NULL, NULL };
     {
         predo_remove_a_cache_from_cpu( &c, &co );
         do_remove_a_cache_from_cpu( &c, &co );
@@ -334,9 +376,9 @@ static void
 test_add_a_cache_to_cpu()
 {
     {
-        CacheForBin    cc   = {{{0, 0, 0}, {0, 0, 0}}};
-        linked_list    item = {0};
-        cached_objects co   = {1024, &item, &item};
+        CacheForBin    cc   = { { { 0, 0, 0 }, { 0, 0, 0 } } };
+        linked_list    item = { 0 };
+        cached_objects co   = { 1024, &item, &item };
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[0], 1024, &item, &item );
         assert_equal( &cc.co[1], 0, 0, 0 );
@@ -344,19 +386,19 @@ test_add_a_cache_to_cpu()
     }
     {
         linked_list    item2;
-        CacheForBin    cc = {{{2048, &item2, &item2}, {0, 0, 0}}};
+        CacheForBin    cc = { { { 2048, &item2, &item2 }, { 0, 0, 0 } } };
         linked_list    item;
-        cached_objects co = {1024, &item, &item};
+        cached_objects co = { 1024, &item, &item };
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[0], 2048, &item2, &item2 );
         assert_equal( &cc.co[1], 1024, &item, &item );
     }
     {
-        linked_list    item3 = {0};
-        linked_list    item2 = {0};
-        CacheForBin    cc    = {{{1024, &item2, &item2}, {2048, &item3, &item3}}};
-        linked_list    item  = {0};
-        cached_objects co    = {1024, &item, &item};
+        linked_list    item3 = { 0 };
+        linked_list    item2 = { 0 };
+        CacheForBin    cc    = { { { 1024, &item2, &item2 }, { 2048, &item3, &item3 } } };
+        linked_list    item  = { 0 };
+        cached_objects co    = { 1024, &item, &item };
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[0], 2048, &item2, &item );
         bassert( item2.next == &item );
@@ -365,11 +407,11 @@ test_add_a_cache_to_cpu()
         bassert( item3.next == NULL );
     }
     {
-        linked_list    item3 = {0};
-        linked_list    item2 = {0};
-        CacheForBin    cc    = {{{2048, &item3, &item3}, {1024, &item2, &item2}}};
-        linked_list    item  = {0};
-        cached_objects co    = {1024, &item, &item};
+        linked_list    item3 = { 0 };
+        linked_list    item2 = { 0 };
+        CacheForBin    cc    = { { { 2048, &item3, &item3 }, { 1024, &item2, &item2 } } };
+        linked_list    item  = { 0 };
+        cached_objects co    = { 1024, &item, &item };
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[1], 2048, &item2, &item );
         bassert( item2.next == &item );
@@ -409,8 +451,9 @@ collect_objects_for_thread_cache( cached_objects* objects, cached_objects* first
     }
 }
 
-__attribute__( ( optimize( "unroll-loops" ) ) ) static void
-predo_fetch_one_from_cpu( CacheForBin* cc, size_t siz __attribute__( ( unused ) ) )
+ATTRIBUTE_UNROLL
+static void
+predo_fetch_one_from_cpu( CacheForBin* cc, size_t /*siz*/ )
 {
     for( int i = 0; i < 2; i++ )
     {
@@ -424,7 +467,8 @@ predo_fetch_one_from_cpu( CacheForBin* cc, size_t siz __attribute__( ( unused ) 
     }
 }
 
-__attribute__( ( optimize( "unroll-loops" ) ) ) static void*
+ATTRIBUTE_UNROLL
+static void*
 do_fetch_one_from_cpu( CacheForBin* cc, size_t siz )
 {
     for( int i = 0; i < 2; i++ )
@@ -501,7 +545,7 @@ try_get_cpu_cached( int processor, binnumber_t bin, uint64_t siz )
 }
 
 static void
-predo_get_global_cached( CacheForBin* cb, GlobalCacheForBin* gb, uint64_t siz __attribute__( ( unused ) ) )
+predo_get_global_cached( CacheForBin* cb, GlobalCacheForBin* gb, uint64_t /*siz*/ )
 {
     uint8_t n = atomic_load( &gb->n_nonempty_caches );
     if( n > 0 )
@@ -516,7 +560,7 @@ predo_get_global_cached( CacheForBin* cb, GlobalCacheForBin* gb, uint64_t siz __
             cached_objects* co  = co0->bytecount < co1->bytecount ? co0 : co1;
             if( co->head == NULL )
             {
-                linked_list* ignore __attribute__( ( unused ) ) = atomic_load( &gb->co[n - 1].tail );
+                linked_list* ignore = atomic_load( &gb->co[n - 1].tail );
                 prefetch_write( &co->tail );    // already fetched as part of co->head
             }
             else
@@ -691,6 +735,7 @@ try_put_cached_both( linked_list* obj, CacheForBin* cb, uint64_t size, uint64_t 
 static bool
 predo_try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objects* cco )
 {
+#if 1
     uint64_t old_cco_bytecount = cco->bytecount;
     if( old_cco_bytecount < per_cpu_cache_bytecount_limit )
     {
@@ -700,20 +745,21 @@ predo_try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached
         prefetch_write( cco );
         return true;
     }
+#endif
     return false;
 }
 
 static void
-predo_put_into_cpu_cache( linked_list* obj, cached_objects* tco, CacheForBin* cc, uint64_t siz __attribute__( ( unused ) ) )
+predo_put_into_cpu_cache( linked_list* obj, cached_objects* tco, CacheForBin* cc, uint64_t /*siz*/ )
 {
     if( predo_try_put_into_cpu_cache_part( obj, tco, &cc->co[0] ) ) return;
     if( predo_try_put_into_cpu_cache_part( obj, tco, &cc->co[1] ) ) return;
-    return;
 }
 
 static bool
 try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objects* cco, uint64_t siz )
 {
+#if 1
     uint64_t     old_cco_bytecount = cco->bytecount;
     linked_list* old_cco_head      = cco->head;
     if( old_cco_bytecount < per_cpu_cache_bytecount_limit )
@@ -733,6 +779,7 @@ try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objec
 
         return true;
     }
+#endif
     return false;
 }
 
@@ -745,9 +792,11 @@ do_put_into_cpu_cache( linked_list* obj, cached_objects* tco, CacheForBin* cc, u
     return false;
 }
 
-__attribute__( ( optimize( "unroll-loops" ) ) ) static void
-predo_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t siz __attribute__( ( unused ) ) )
+ATTRIBUTE_UNROLL
+static void
+predo_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t /*siz*/ )
 {
+#if 1
     for( int i = 0; i < 2; i++ )
     {
         uint64_t old_bytecount = cc->co[i].bytecount;
@@ -759,11 +808,14 @@ predo_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t siz __
             return;
         }
     }
+#endif
 }
 
-__attribute__( ( optimize( "unroll-loops" ) ) ) static bool
+ATTRIBUTE_UNROLL
+static bool
 do_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t siz )
 {
+#if 1
     for( int i = 0; i < 2; i++ )
     {
         uint64_t old_bytecount = cc->co[i].bytecount;
@@ -777,6 +829,7 @@ do_put_one_into_cpu_cache( linked_list* obj, CacheForBin* cc, uint64_t siz )
             return true;
         }
     }
+#endif
     return false;
 }
 
@@ -785,6 +838,7 @@ try_put_into_cpu_cache( linked_list* obj, int processor, binnumber_t bin, uint64
 // Effect: Move obj and stuff from a threadcache into a cpu cache, if the cpu has space.
 // Requires: the threadcache has stuff in it.
 {
+#if 1
     if( use_threadcache )
     {
         init_cache();
@@ -798,17 +852,18 @@ try_put_into_cpu_cache( linked_list* obj, int processor, binnumber_t bin, uint64
         return atomically( &cpu_cache_locks[processor][bin], "put_one_into_cpu_cache", predo_put_one_into_cpu_cache,
                            do_put_one_into_cpu_cache, obj, &cache_for_cpu[processor].cb[bin], siz );
     }
+#endif
 }
 
 static void
-predo_put_into_global_cache( linked_list* obj, CacheForBin* cb, GlobalCacheForBin* gb, uint64_t siz __attribute__( ( unused ) ) )
+predo_put_into_global_cache( linked_list* obj, CacheForBin* cb, GlobalCacheForBin* gb, uint64_t /*siz*/ )
 {
     uint8_t  gnum          = atomic_load( &gb->n_nonempty_caches );
     uint64_t old_bytecount = atomic_load( &cb->co[0].bytecount );
     if( gnum < global_cache_depth && old_bytecount >= per_cpu_cache_bytecount_limit )
     {
-        obj->next                                   = cb->co[0].head;    // obj->next is private, so we can write to it.
-        uint64_t ignore __attribute__( ( unused ) ) = atomic_load( &gb->co[gnum].bytecount );
+        obj->next       = cb->co[0].head;    // obj->next is private, so we can write to it.
+        uint64_t ignore = atomic_load( &gb->co[gnum].bytecount );
         prefetch_write( &gb->co[gnum] );
         prefetch_write( &cb->co[0] );
         prefetch_write( &gb->n_nonempty_caches );
@@ -865,7 +920,9 @@ cached_free( void* ptr, binnumber_t bin )
         init_cache();
         if( try_put_cached_both( reinterpret_cast<linked_list*>( ptr ), &cache_for_thread.cb[bin], siz,
                                  thread_cache_bytecount_limit ) )
-        { return; }
+        {
+            return;
+        }
     }
 
     int p = getcpu() % cpulimit;

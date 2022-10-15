@@ -1,1 +1,0 @@
-bool have_TSX();
