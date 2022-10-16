@@ -18,7 +18,7 @@
 #include "atomically.h"
 #include "bassert.h"
 #include "cpucores.h"
-#include "generated_constants.h"
+#include "generated_constants.hxx"
 
 #define PREFIX super_
 
@@ -231,7 +231,7 @@ extern "C"
         }
     }
 
-    free_p = ( void ( * )( void* ) )( dlsym( RTLD_NEXT, "free" ) );
+    free_p = (void ( * )( void* )) ( dlsym( RTLD_NEXT, "free" ) );
 #elif defined( _WIN64 )
     // do nothing
 #endif

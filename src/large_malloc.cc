@@ -8,7 +8,7 @@
 
 #include "atomically.h"
 #include "bassert.h"
-#include "generated_constants.h"
+#include "generated_constants.hxx"
 #include "malloc_internal.h"
 
 #ifdef ENABLE_LOG_CHECKING

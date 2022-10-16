@@ -3,7 +3,7 @@
 #endif
 #include "atomically.h"
 #include "bassert.h"
-#include "generated_constants.h"
+#include "generated_constants.hxx"
 #include "malloc_internal.h"
 
 lock_t small_locks[first_large_bin_number] = { REPEAT_FOR_SMALL_BINS( LOCK_INITIALIZER ) };

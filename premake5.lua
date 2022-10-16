@@ -1,3 +1,30 @@
+require('vstudio')
+
+premake.override(premake.vstudio.vc2010, "buildEvents", function(base, cfg)
+	local write = function (event)
+		local name = event .. "Event"
+		local field = event:lower()
+		local steps = cfg[field .. "commands"]
+		local msg = cfg[field .. "message"]
+
+		if #steps > 0 then
+			steps = os.translateCommandsAndPaths(steps, cfg.project.basedir, cfg.project.location, 'windows')
+			for i = 1, #steps do
+                steps[i] = path.translate(steps[i])
+            end
+			premake.push('<%s>', name)
+			premake.x('<Command>%s</Command>', table.implode(steps, "", "", "\r\n"))
+			if msg then
+				premake.x('<Message>%s</Message>', msg)
+			end
+			premake.pop('</%s>', name)
+		end
+    end
+	write("PreBuild")
+	write("PreLink")
+	write("PostBuild")
+end)
+
 newoption {
     trigger = "enable-log-check",
     description = "Enable log checking"
@@ -13,16 +40,15 @@ newoption {
     description = "Create code coverage report"
 }
 
-
 workspace "SuperMalloc"
     configurations { "Debug", "Release" }
 
-filter "configurations:Debug"
+filter { "configurations:Debug" }
     defines { "DEBUG" }
     symbols "On"
     targetsuffix "_d"
 
-filter "configurations:Release"
+filter { "configurations:Release" }
     defines { "NDEBUG" }
     optimize "On"
 
@@ -36,6 +62,9 @@ filter {}
 filter { "system:windows" }
     platforms { "x64" }
 
+filter { "system:windows", "configurations:Release" }
+    flags { "NoIncrementalLink" }
+
 filter { "system:linux" }
     platforms { "linux64" }
     links { "pthread", "dl" }
@@ -43,15 +72,12 @@ filter { "system:linux" }
 filter "action:vs*"
     defines { "_CRT_SECURE_NO_DEPRECATE", "_CRT_SECURE_NO_WARNINGS", "_CRT_NONSTDC_NO_WARNINGS" }
 
-filter { "system:windows", "configurations:Release" }
-    flags { "NoIncrementalLink" }
-
 group "SuperMalloc"
 
 project "supermalloc"
     kind "StaticLib"
     dependson { "objsizes" }
-    files { "src/*.cc", "src/*.h" }
+    files { "src/*.cc", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
     excludes { "src/objsizes.cc", "src/unit-tests.cc", "src/unit-tests.h" }
     if _OPTIONS["enable-log-check"] then
         defines { "ENABLE_LOG_CHECKING" }
@@ -63,13 +89,13 @@ project "supermalloc"
 project "objsizes"
     kind "ConsoleApp"
     files { "src/objsizes.cc" }
-    postbuildcommands { "%{cfg.buildtarget.abspath} src/generated_constants.cxx > src/generated_constants.hxx" }
+    postbuildcommands { "%{cfg.buildtarget.abspath:gsub('/', '\\')} src/generated_constants.cxx > src/generated_constants.hxx" }
 
 group "Tests"
 
 project "supermalloc_test"
     kind "ConsoleApp"
-    files { "src/*.cc", "src/*.h" }
+    files { "src/*.cc", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
     excludes { "src/objsizes.cc" }
     defines {"TESTING"}
     
