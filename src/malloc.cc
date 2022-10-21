@@ -20,7 +20,7 @@
 #include "cpucores.h"
 #include "generated_constants.hxx"
 
-#define PREFIX super_
+#define PREFIX sm_
 
 #ifndef PREFIX
 #define PREFIXIFY( f ) f
@@ -48,34 +48,36 @@ test_size_2_bin( void )
     for( size_t i = 8; i <= largest_large; i++ )
     {
         binnumber_t g = size_2_bin( i );
-        bassert( g < first_huge_bin_number );
-        bassert( i <= static_bin_info[g].object_size );
+        SM_ASSERT( g < first_huge_bin_number );
+        SM_ASSERT( i <= static_bin_info[g].object_size );
         if( g > 0 )
-            bassert( i > static_bin_info[g - 1].object_size );
+            SM_ASSERT( i > static_bin_info[g - 1].object_size );
         else
-            bassert( AND( g == 0, i == 8 ) );
+        {
+            SM_ASSERT( AND( g == 0, i == 8 ) );
+        }
         size_t s = bin_2_size( g );
-        bassert( s >= i );
-        bassert( size_2_bin( s ) == g );
+        SM_ASSERT( s >= i );
+        SM_ASSERT( size_2_bin( s ) == g );
     }
-    for( size_t i = largest_large + 1; i <= chunksize; i++ ) { bassert( size_2_bin( i ) == first_huge_bin_number ); }
-    bassert( bin_2_size( first_huge_bin_number - 1 ) < chunksize );
-    bassert( bin_2_size( first_huge_bin_number ) == chunksize );
-    bassert( bin_2_size( first_huge_bin_number + 1 ) == chunksize * 2 );
-    bassert( bin_2_size( first_huge_bin_number + 2 ) == chunksize * 4 );
+    for( size_t i = largest_large + 1; i <= chunksize; i++ ) { SM_ASSERT( size_2_bin( i ) == first_huge_bin_number ); }
+    SM_ASSERT( bin_2_size( first_huge_bin_number - 1 ) < chunksize );
+    SM_ASSERT( bin_2_size( first_huge_bin_number ) == chunksize );
+    SM_ASSERT( bin_2_size( first_huge_bin_number + 1 ) == chunksize * 2 );
+    SM_ASSERT( bin_2_size( first_huge_bin_number + 2 ) == chunksize * 4 );
     for( int k = 0; k < 1000; k++ )
     {
         size_t      s = chunksize * 10 + pagesize * k;
         binnumber_t b = size_2_bin( s );
-        bassert( size_2_bin( bin_2_size( b ) ) == b );
-        bassert( bin_2_size( size_2_bin( s ) ) == hyperceil( s ) );
+        SM_ASSERT( size_2_bin( bin_2_size( b ) ) == b );
+        SM_ASSERT( bin_2_size( size_2_bin( s ) ) == hyperceil( s ) );
     }
 
     // Verify that all the bins that are 256 or larger are multiples of a cache line.
     for( binnumber_t i = 0; i <= first_huge_bin_number; i++ )
     {
         size_t os = static_bin_info[i].object_size;
-        bassert( OR( os < 256, os % 64 == 0 ) );
+        SM_ASSERT( OR( os < 256, os % 64 == 0 ) );
     }
 }
 #endif
@@ -203,7 +205,7 @@ extern "C"
     chunk_infos = (chunk_info*) mmap_allocate_space( alloc_size );
     commit_ci_page_as_needed( 0 );
 #endif
-    bassert( chunk_infos );
+    SM_ASSERT( chunk_infos );
 
     n_cores = cpucores();
 
@@ -231,7 +233,7 @@ extern "C"
         }
     }
 
-    free_p = (void ( * )( void* )) ( dlsym( RTLD_NEXT, "free" ) );
+    free_p = ( void ( * )( void* ) )( dlsym( RTLD_NEXT, "free" ) );
 #elif defined( _WIN64 )
     // do nothing
 #endif
@@ -240,7 +242,6 @@ extern "C"
 void
 maybe_initialize_malloc( void )
 {
-    // This should be protected by a lock.
     if( atomic_load( &chunk_infos ) ) return;
     while( __sync_lock_test_and_set( &initialize_lock, 1 ) ) { _mm_pause(); }
     if( !chunk_infos ) initialize_malloc();
@@ -264,8 +265,8 @@ slow_hyperceil( uint64_t a )
 static void
 test_hyperceil_v( uint64_t a, uint64_t expected )
 {
-    bassert( hyperceil( a ) == slow_hyperceil( a ) );
-    bassert( hyperceil( a ) == expected );
+    SM_ASSERT( hyperceil( a ) == slow_hyperceil( a ) );
+    SM_ASSERT( hyperceil( a ) == expected );
 }
 
 void
@@ -360,7 +361,7 @@ FREE( void* p ) __THROW
         }
     }
     binnumber_t bin = bin_from_bin_and_size( bnt );
-    bassert( !( offset_in_chunk( p ) == 0 && bin == 0 ) );    // we cannot have a bin 0 item that is chunk-aligned
+    SM_ASSERT( !( offset_in_chunk( p ) == 0 && bin == 0 ) );    // we cannot have a bin 0 item that is chunk-aligned
     if( bin < first_huge_bin_number )
     {
         // Cached_free cannot tolerate it.
@@ -409,14 +410,14 @@ test_realloc( void )
     char* a = (char*) MALLOC( 128 );
     for( int i = 0; i < 128; i++ ) a[i] = 'a';
     char* b = (char*) REALLOC( a, 1 + MALLOC_USABLE_SIZE( a ) );
-    bassert( a != b );
-    for( int i = 0; i < 128; i++ ) bassert( b[i] == 'a' );
-    bassert( MALLOC_USABLE_SIZE( b ) >= 129 );
+    SM_ASSERT( a != b );
+    for( int i = 0; i < 128; i++ ) SM_ASSERT( b[i] == 'a' );
+    SM_ASSERT( MALLOC_USABLE_SIZE( b ) >= 129 );
     char* c = (char*) REALLOC( b, 32 );
-    bassert( c != b );
-    for( int i = 0; i < 32; i++ ) bassert( c[i] == 'a' );
+    SM_ASSERT( c != b );
+    for( int i = 0; i < 32; i++ ) SM_ASSERT( c[i] == 'a' );
     char* d = (char*) REALLOC( c, 31 );
-    bassert( c == d );
+    SM_ASSERT( c == d );
     FREE( d );
 }
 #endif
@@ -439,7 +440,7 @@ CALLOC( size_t number, size_t size ) __THROW
     else if( usable_from_base % pagesize != 0 )
     {
         // If the base object is page aligned, and the usable amount isn't page aligned, it's still pretty small, so just zero it.
-        bassert( usable_from_base < chunksize );
+        SM_ASSERT( usable_from_base < chunksize );
         memset( result, 0, number * size );
     }
     else
@@ -455,8 +456,8 @@ align_pointer_up( void* p, uint64_t alignment, uint64_t size, uint64_t alloced_s
 {
     uint64_t ru = reinterpret_cast<uint64_t>( p );
     uint64_t ra = ( ru + alignment - 1 ) & ~( alignment - 1 );
-    bassert( ( ra & ( alignment - 1 ) ) == 0 );
-    bassert( ra + size <= ru + alloced_size );
+    SM_ASSERT( ( ra & ( alignment - 1 ) ) == 0 );
+    SM_ASSERT( ra + size <= ru + alloced_size );
     return reinterpret_cast<void*>( ra );
 }
 
@@ -496,7 +497,7 @@ aligned_malloc_internal( size_t alignment, size_t size )
         void* r = huge_malloc( std::max(
             alignment, size ) );    // this will be aligned.  The bookkeeping will be messed up if alignment>size, however.
         if( r == NULL ) return NULL;
-        bassert( ( reinterpret_cast<uint64_t>( r ) & ( alignment - 1 ) ) == 0 );    // make sure it is aligned
+        SM_ASSERT( ( reinterpret_cast<uint64_t>( r ) & ( alignment - 1 ) ) == 0 );    // make sure it is aligned
         return r;
     }
 }
@@ -543,6 +544,7 @@ POSIX_MEMALIGN( void** ptr, size_t alignment, size_t size ) __THROW
         *ptr = NULL;
         return 0;
     }
+
     void* r = aligned_malloc_internal( alignment, size );
     if( r == NULL )
     {
@@ -562,6 +564,7 @@ MEMALIGN( size_t alignment, size_t size ) __THROW
 {
     if( alignment & ( alignment - 1 ) )
     {
+        errno = EINVAL;
         // alignment must be a power of two.
         return NULL;
     }
@@ -575,14 +578,14 @@ MALLOC_USABLE_SIZE( const void* ptr )
 {
     chunknumber_t  cn      = address_2_chunknumber( ptr );
     bin_and_size_t b_and_s = chunk_infos[cn].bin_and_size;
-    bassert( b_and_s != 0 );
+    SM_ASSERT( b_and_s != 0 );
     binnumber_t bin  = bin_from_bin_and_size( b_and_s );
     const char* base = reinterpret_cast<const char*>( object_base( const_cast<void*>( ptr ) ) );
-    bassert( address_2_chunknumber( base ) == cn );
+    SM_ASSERT( address_2_chunknumber( base ) == cn );
     const char* ptr_c     = reinterpret_cast<const char*>( ptr );
     size_t      base_size = bin_2_size( bin );
-    bassert( base <= ptr );
-    bassert( static_cast<ptrdiff_t>( base_size ) >= ptrdiff_t( ptr_c - base ) );
+    SM_ASSERT( base <= ptr );
+    SM_ASSERT( static_cast<ptrdiff_t>( base_size ) >= ptrdiff_t( ptr_c - base ) );
     return base_size - ( ptr_c - base );
 }
 
@@ -594,12 +597,12 @@ test_malloc_usable_size_internal( size_t given_s )
     size_t      as   = MALLOC_USABLE_SIZE( a );
     char*       base = reinterpret_cast<char*>( object_base( a ) );
     binnumber_t b    = size_2_bin( MALLOC_USABLE_SIZE( base ) );
-    bassert( MALLOC_USABLE_SIZE( base ) == bin_2_size( b ) );
-    bassert( MALLOC_USABLE_SIZE( base ) + base == MALLOC_USABLE_SIZE( a ) + a );
-    if( b < first_huge_bin_number ) { bassert( address_2_chunknumber( a ) == address_2_chunknumber( a + as - 1 ) ); }
+    SM_ASSERT( MALLOC_USABLE_SIZE( base ) == bin_2_size( b ) );
+    SM_ASSERT( MALLOC_USABLE_SIZE( base ) + base == MALLOC_USABLE_SIZE( a ) + a );
+    if( b < first_huge_bin_number ) { SM_ASSERT( address_2_chunknumber( a ) == address_2_chunknumber( a + as - 1 ) ); }
     else
     {
-        bassert( offset_in_chunk( base ) == 0 );
+        SM_ASSERT( offset_in_chunk( base ) == 0 );
     }
     FREE( a );
 }
@@ -620,13 +623,13 @@ object_base( void* ptr )
     // Requires: ptr is on the same chunk as the object base.
     chunknumber_t  cn      = address_2_chunknumber( ptr );
     bin_and_size_t b_and_s = chunk_infos[cn].bin_and_size;
-    bassert( b_and_s != 0 );
+    SM_ASSERT( b_and_s != 0 );
     binnumber_t bin = bin_from_bin_and_size( b_and_s );
     if( bin >= first_huge_bin_number ) { return address_2_chunkaddress( ptr ); }
     else
     {
         uint64_t wasted_offset = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
-        bassert( offset_in_chunk( ptr ) >= wasted_offset );
+        SM_ASSERT( offset_in_chunk( ptr ) >= wasted_offset );
         uint64_t useful_offset   = offset_in_chunk( ptr ) - wasted_offset;
         uint32_t folio_number    = divide_offset_by_foliosize( static_cast<uint32_t>( useful_offset ), bin );
         uint64_t folio_mul       = folio_number * static_bin_info[bin].folio_size;
@@ -644,7 +647,7 @@ test_object_base()
     void* p = MALLOC( 8193 );
     //printf("objbase p      =%p\n", p);
     //printf("        objbase=%p\n", object_base(p));
-    bassert( offset_in_chunk( object_base( p ) ) >= 4096 );
+    SM_ASSERT( offset_in_chunk( object_base( p ) ) >= 4096 );
 }
 #endif
 
@@ -760,7 +763,7 @@ test_object_base()
 bin_and_size_t
 bin_and_size_to_bin_and_size( binnumber_t bin, size_t size )
 {
-    bassert( bin < 127 );
+    SM_ASSERT( bin < 127 );
     uint32_t n_pages = static_cast<uint32_t>( ceil( size, pagesize ) );
     if( n_pages < ( 1 << 24 ) ) { return 1 + bin + ( 1 << 7 ) + ( n_pages << 8 ); }
     else

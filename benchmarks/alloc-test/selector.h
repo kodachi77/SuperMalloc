@@ -34,7 +34,7 @@
 #ifndef SELECTOR_H
 #define SELECTOR_H
 
-// TODO:
+// STEPS:
 // (1) #include "my_allocator.h"
 // (2) define MyAllocatorT properly
 // (3) make sure other inclusions and/or definitions are removed or commented out :)

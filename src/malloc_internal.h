@@ -3,6 +3,8 @@
 
 #ifdef TESTING
 #include <stdio.h>
+#include <inttypes.h>
+#include <time.h>
 #endif
 #include "bassert.h"
 
@@ -10,6 +12,24 @@
 #include <sys/types.h>
 
 #include "config.h"
+
+#ifdef TESTING
+#define SM_LOG_DEBUG( format, ... ) if (0) log_debug( stdout, format, ##__VA_ARGS__ )
+#define SM_LOG_FATAL( format, ... ) log_debug( stderr, format, ##__VA_ARGS__ )
+
+inline void
+log_debug( FILE* f, const char* format, ... )
+{
+    va_list args;
+    va_start( args, format );
+    vfprintf( f, format, args );
+    va_end( args );
+}
+
+#else
+#define SM_LOG_DEBUG( format, ... )
+#define SM_LOG_FATAL( format, ... )
+#endif
 
 const uint64_t pagesize            = 4096;
 const uint64_t log_chunksize       = 21;
@@ -30,7 +50,7 @@ bin_and_size_t bin_and_size_to_bin_and_size( binnumber_t bin, size_t size );
 static inline binnumber_t
 bin_from_bin_and_size( bin_and_size_t bnt )
 {
-    bassert( ( bnt & 127 ) != 0 );
+    SM_ASSERT( ( bnt & 127 ) != 0 );
     return ( bnt & 127 ) - 1;
 }
 
@@ -63,7 +83,7 @@ lg_of_power_of_two( uint64_t a )
 // Requires: a is a power of two.
 {
 #ifdef TESTING
-    bassert( ( a & ( a - 1 ) ) == 0 );
+    SM_ASSERT( ( a & ( a - 1 ) ) == 0 );
 #endif
     return __builtin_ctzl( a );
 }
@@ -97,6 +117,7 @@ pagenum_in_chunk( const void* a )
 {
     return offset_in_chunk( a ) / pagesize;
 }
+
 static inline uint64_t
 offset_in_page( const void* a )
 {
@@ -160,13 +181,14 @@ extern chunk_info* chunk_infos;
 static inline int
 check_ci_bit( uint32_t k )
 {
-    return ( ( ci_bitfields[k / 32] & ( 1 << ( k % 32 ) ) ) != 0 );
+    uint32_t bits = atomic_load( &ci_bitfields[k / 32] );
+    return ( ( bits & ( 1 << ( k % 32 ) ) ) != 0 );
 }
 
 static inline void
 set_ci_bit( uint32_t k )
 {
-    ci_bitfields[k / 32] |= 1 << ( k % 32 );
+    __sync_fetch_and_or( (int32_t*) &ci_bitfields[k / 32], long( 1 << ( k % 32 ) ) );
 }
 
 static inline void
@@ -218,12 +240,15 @@ static inline void
 print_bin_stats()
 {
 }
+
 static inline void bin_stats_note_malloc( binnumber_t /*b*/ )
 {
 }
+
 static inline void bin_stats_note_free( binnumber_t /*b*/ )
 {
 }
+
 #endif
 
 #ifdef TESTING

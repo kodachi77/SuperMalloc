@@ -80,8 +80,6 @@ extern int                    failed_counts_n;
 extern struct failed_counts_s failed_counts[max_failed_counts];
 #endif
 
-//#define LATE_LOCK_SUBSCRIPTION
-
 template <typename ReturnType, typename... Arguments>
 static inline ReturnType
 atomically( lock_t* mylock, const char* /*name*/, void ( *predo )( Arguments... args ), ReturnType ( *fun )( Arguments... args ),
@@ -109,7 +107,7 @@ atomically( lock_t* mylock, const char* /*name*/, void ( *predo )( Arguments... 
                 goto didit;
             }
         }
-        bassert( failed_counts_n < max_failed_counts );
+        SM_ASSERT( failed_counts_n < max_failed_counts );
         failed_counts[failed_counts_n++] = ( struct failed_counts_s ) { name, xr, 1 };
     didit:;
     }
@@ -149,7 +147,7 @@ atomically2( lock_t* lock0, lock_t* lock1, const char* /*name*/, void ( *predo )
                 goto didit;
             }
         }
-        bassert( failed_counts_n < max_failed_counts );
+        SM_ASSERT( failed_counts_n < max_failed_counts );
         failed_counts[failed_counts_n++] = ( struct failed_counts_s ) { name, xr, 1 };
     didit:;
     }

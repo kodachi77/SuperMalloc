@@ -1,6 +1,7 @@
-#ifdef __linux__
+#if defined (__linux__)
 #include <sys/mman.h>
 #endif
+
 #include "atomically.h"
 #include "bassert.h"
 #include "generated_constants.hxx"
@@ -61,7 +62,7 @@ verify_small_invariants()
         mylock_raii mr( &small_locks[27] );
         if( 0 && dsbi.fullest_offset[27] == 0 )
         {
-            for( unsigned int i = 1; i < static_bin_info[27].objects_per_folio; i++ ) { bassert( dsbi.lists.b27[i] == NULL ); }
+            for( unsigned int i = 1; i < static_bin_info[27].objects_per_folio; i++ ) { SM_ASSERT( dsbi.lists.b27[i] == NULL ); }
         }
     }
     //  return;
@@ -73,24 +74,24 @@ verify_small_invariants()
         objects_per_folio_t opp         = static_bin_info[bin].objects_per_folio;
         if( fullest_off == 0 )
         {
-            for( uint16_t i = 1; i <= opp; i++ ) { bassert( dsbi.lists.b[start + i] == NULL ); }
+            for( uint16_t i = 1; i <= opp; i++ ) { SM_ASSERT( dsbi.lists.b[start + i] == NULL ); }
         }
         else
         {
-            bassert( fullest_off <= opp );
-            bassert( dsbi.lists.b[start + fullest_off] != NULL );
-            for( uint16_t i = 1; i < fullest_off; i++ ) { bassert( dsbi.lists.b[start + i] == NULL ); }
+            SM_ASSERT( fullest_off <= opp );
+            SM_ASSERT( dsbi.lists.b[start + fullest_off] != NULL );
+            for( uint16_t i = 1; i < fullest_off; i++ ) { SM_ASSERT( dsbi.lists.b[start + i] == NULL ); }
         }
         for( uint16_t i = 0; i <= opp; i++ )
         {
             per_folio* prev_pp = NULL;
             for( per_folio* pp = dsbi.lists.b[start + i]; pp; pp = pp->next )
             {
-                bassert( prev_pp == pp->prev );
+                SM_ASSERT( prev_pp == pp->prev );
                 prev_pp      = pp;
                 uint64_t sum = 0;
                 for( uint32_t j = 0; j < folio_bitmap_n_words; j++ ) { sum += __builtin_popcountl( pp->inuse_bitmap[j] ); }
-                bassert( sum == opp - i );
+                SM_ASSERT( sum == opp - i );
             }
         }
     }
@@ -196,7 +197,7 @@ do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint64_t o_size )
         result_pp = dsbi.lists.b[dsbi_offset + fetch_offset];
     }
 
-    bassert( result_pp );
+    SM_ASSERT( result_pp );
     // update the linked list.
     per_folio* next = result_pp->next;
 
@@ -246,8 +247,8 @@ do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint64_t o_size )
             int      bit_to_set        = __builtin_ctzl( bwbar );
             result_pp->inuse_bitmap[w] = bw | ( 1ull << bit_to_set );
 
-            if( 0 ) printf( "result_pp  = %p\n", result_pp );
-            if( 0 ) printf( "bit_to_set = %d\n", bit_to_set );
+            SM_LOG_DEBUG( "result_pp  = %p\n", result_pp );
+            SM_LOG_DEBUG( "bit_to_set = %d\n", bit_to_set );
 
             uint64_t chunk_address = reinterpret_cast<uint64_t>( address_2_chunkaddress( result_pp ) );
             uint64_t wasted_off    = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
@@ -294,7 +295,7 @@ small_malloc( binnumber_t bin )
     verify_small_invariants();
     bin_stats_note_malloc( bin );
     //size_t usable_size = bin_2_size(bin);
-    bassert( bin < first_large_bin_number );
+    SM_ASSERT( bin < first_large_bin_number );
     uint32_t            dsbi_offset      = dynamic_small_bin_offset( bin );
     objects_per_folio_t o_per_folio      = static_bin_info[bin].objects_per_folio;
     uint64_t            o_size           = static_bin_info[bin].object_size;
@@ -304,14 +305,14 @@ small_malloc( binnumber_t bin )
         WHEN_MICROTIMING( uint64_t end_early_small_malloc = rdtsc();
                           clocks_spent_in_early_small_malloc += end_early_small_malloc - start_small_malloc );
         uint32_t fullest = atomic_load( &dsbi.fullest_offset[bin] );    // Otherwise it looks racy.
-        if( 0 ) printf( " bin=%d off=%d  fullest=%d\n", bin, dsbi_offset, fullest );
+        SM_LOG_DEBUG( " bin=%d off=%d  fullest=%d\n", bin, dsbi_offset, fullest );
         if( fullest == 0 )
         {
-            if( 0 ) printf( "Need a chunk\n" );
+            SM_LOG_DEBUG( "Need a chunk\n" );
             void* chunk = mmap_chunk_aligned_block( 1 );
             if( chunk == NULL ) return NULL;
             bin_and_size_t b_and_s = bin_and_size_to_bin_and_size( bin, 0 );
-            bassert( b_and_s != 0 );
+            SM_ASSERT( b_and_s != 0 );
             chunknumber_t chunknum = address_2_chunknumber( chunk );
             commit_ci_page_as_needed( chunknum );
             chunk_infos[chunknum].bin_and_size = b_and_s;
@@ -341,7 +342,7 @@ small_malloc( binnumber_t bin )
         );
         if( result )
         {
-            bassert( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( result )].bin_and_size ) == bin );
+            SM_ASSERT( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( result )].bin_and_size ) == bin );
             return result;
         }
     }
@@ -373,7 +374,10 @@ time_small_malloc( void )
     //printf("start=%ld.%09ld\n", start.tv_sec, start.tv_nsec);
     //printf("end  =%ld.%09ld\n", end.tv_sec,   end.tv_nsec);
     //printf("tdiff=%0.9f\n", tdiff(&start, &end));
+    #ifdef TESTING 
+    // TODO: write to debug stream when in release mode
     printf( "%fns/small_malloc\n", tdiff( &start, &end ) * 1e9 / ncalls );
+    #endif
     WHEN_MICROTIMING( (
         {
             printf( "%5.1f clocks/small_malloc\n", clocks_in_small_malloc / (double) ncalls );
@@ -401,7 +405,7 @@ predo_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi
     uint32_t imax        = ceil32( static_bin_info[bin].objects_per_folio, 64 );
     for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( atomic_load( &pp->inuse_bitmap[i] ) );
     // prefetch for clearing the bit.  We know it was just loaded, so we don't have to load it again.
-    bassert( objnum / 64 < imax );
+    SM_ASSERT( objnum / 64 < imax );
     prefetch_write( &pp->inuse_bitmap[objnum / 64] );
 
     uint32_t old_offset_within = o_per_folio - static_cast<uint16_t>( old_count );
@@ -442,9 +446,9 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( pp->inuse_bitmap[i] );
     // clear the bit.
     uint64_t old_bits = pp->inuse_bitmap[objnum / 64];
-    bassert( old_bits & ( 1ull << ( objnum % 64 ) ) );
+    SM_ASSERT( old_bits & ( 1ull << ( objnum % 64 ) ) );
     pp->inuse_bitmap[objnum / 64] = old_bits & ~( 1ull << ( objnum % 64 ) );
-    if( IS_TESTING ) bassert( old_count > 0 && old_count <= o_per_folio );
+    if( IS_TESTING ) SM_ASSERT( old_count > 0 && old_count <= o_per_folio );
 
     uint32_t old_offset_within = o_per_folio - static_cast<uint16_t>( old_count );
     uint32_t new_offset_within = old_offset_within + 1;
@@ -456,7 +460,7 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     per_folio* pp_prev = pp->prev;
     if( pp_prev == NULL )
     {
-        bassert( dsbi.lists.b[old_offset_dsbi] == pp );
+        SM_ASSERT( dsbi.lists.b[old_offset_dsbi] == pp );
         dsbi.lists.b[old_offset_dsbi] = pp_next;
     }
     else
@@ -471,7 +475,7 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
         dsbi.fullest_offset[bin] = new_offset_within;
     }
     // Add to new list
-    bassert( new_offset < dsbi_offset + o_per_folio + 1 );
+    SM_ASSERT( new_offset < dsbi_offset + o_per_folio + 1 );
     if( new_offset != dsbi_offset + o_per_folio || dsbi.lists.b[new_offset] == NULL )
     {
         // Don't madvise the folio, since either it's not empty or there are no folios in the empty slot.
@@ -528,24 +532,24 @@ small_free( void* p )
     small_chunk_header* sch       = reinterpret_cast<small_chunk_header*>( chunk );
     chunknumber_t       chunk_num = address_2_chunknumber( p );
     bin_and_size_t      b_and_s   = chunk_infos[chunk_num].bin_and_size;
-    bassert( b_and_s != 0 );
+    SM_ASSERT( b_and_s != 0 );
     binnumber_t bin           = bin_from_bin_and_size( b_and_s );
     uint64_t    wasted_offset = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
     uint64_t    useful_offset = offset_in_chunk( p ) - wasted_offset;
-    bassert( reinterpret_cast<uint64_t>( p ) >= wasted_offset );
+    SM_ASSERT( reinterpret_cast<uint64_t>( p ) >= wasted_offset );
     uint32_t   folio_num  = divide_offset_by_foliosize( static_cast<uint32_t>( useful_offset ), bin );
     per_folio* pp         = &sch->ll[folio_num];
     uint32_t   folio_size = static_cast<uint32_t>( static_bin_info[bin].folio_size );
-    bassert( useful_offset <= UINT32_MAX );
+    SM_ASSERT( useful_offset <= UINT32_MAX );
     uint32_t offset_in_folio = useful_offset - folio_num * folio_size;
     uint64_t objnum          = divide_offset_by_objsize( offset_in_folio, bin );
     if( IS_TESTING )
     {
         uint64_t o_size  = static_bin_info[bin].object_size;
         uint64_t objnum2 = offset_in_folio / o_size;
-        bassert( objnum == objnum2 );
+        SM_ASSERT( objnum == objnum2 );
     }
-    if( IS_TESTING ) bassert( ( pp->inuse_bitmap[objnum / 64] >> ( objnum % 64 ) ) & 1 );
+    if( IS_TESTING ) SM_ASSERT( ( pp->inuse_bitmap[objnum / 64] >> ( objnum % 64 ) ) & 1 );
     uint32_t dsbi_offset = dynamic_small_bin_offset( bin );
 
     per_folio* madvise_me =
@@ -556,7 +560,7 @@ small_free( void* p )
         // other thread could free an object into it, and we kept it out
         // of the dsbi lists, so no other thread can try to allocate out
         // of it.)
-        bassert( madvise_me == pp );
+        SM_ASSERT( madvise_me == pp );
         uint64_t madvise_address = ( chunk_num * chunksize ) + wasted_offset + folio_num * folio_size;
         madvise( reinterpret_cast<void*>( madvise_address ), folio_size, MADV_DONTNEED );
         // Now put it back into the list.
@@ -592,25 +596,25 @@ test_bin_27()
                 ( useful_offset - folio_numbers[objnum] * static_bin_info[bin].folio_size ) / static_bin_info[bin].object_size );
             small_chunk_header* sch = reinterpret_cast<small_chunk_header*>( address_2_chunkaddress( allocated[objnum] ) );
             pps[objnum]             = &sch->ll[folio_numbers[objnum]];
-            bassert( object_numbers_in_folio[objnum] < 64 );
-            bassert( 1 == ( ( pps[objnum]->inuse_bitmap[0] >> object_numbers_in_folio[objnum] ) & 1 ) );
+            SM_ASSERT( object_numbers_in_folio[objnum] < 64 );
+            SM_ASSERT( 1 == ( ( pps[objnum]->inuse_bitmap[0] >> object_numbers_in_folio[objnum] ) & 1 ) );
         }
         for( int objnum = 0; objnum < n_objects; objnum++ )
         {
             for( int k = 0; k < n_objects; k++ )
             {
                 if( k < objnum )
-                    bassert( 0 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
+                    SM_ASSERT( 0 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
                 else
-                    bassert( 1 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
+                    SM_ASSERT( 1 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
             }
             small_free( allocated[objnum] );
             for( int k = 0; k < n_objects; k++ )
             {
                 if( k <= objnum )
-                    bassert( 0 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
+                    SM_ASSERT( 0 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
                 else
-                    bassert( 1 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
+                    SM_ASSERT( 1 == ( ( pps[k]->inuse_bitmap[0] >> object_numbers_in_folio[k] ) & 1 ) );
             }
         }
     }
@@ -625,9 +629,9 @@ void
 test_small_malloc( void )
 {
     // test that the dsbi offsets look reasonable.
-    bassert( &dsbi.lists.b0[0] == &dsbi.lists.b[dynamic_small_bin_offset( 0 )] );
-    bassert( &dsbi.lists.b1[0] == &dsbi.lists.b[dynamic_small_bin_offset( 1 )] );
-    bassert( &dsbi.lists.b2[0] == &dsbi.lists.b[dynamic_small_bin_offset( 2 )] );
+    SM_ASSERT( &dsbi.lists.b0[0] == &dsbi.lists.b[dynamic_small_bin_offset( 0 )] );
+    SM_ASSERT( &dsbi.lists.b1[0] == &dsbi.lists.b[dynamic_small_bin_offset( 1 )] );
+    SM_ASSERT( &dsbi.lists.b2[0] == &dsbi.lists.b[dynamic_small_bin_offset( 2 )] );
 
     test_bin_27();
 
@@ -651,7 +655,7 @@ test_small_malloc( void )
     printf( "y (2k)=%p\n", y );
     void* z = small_malloc( size_2_bin( 2048 ) );
     printf( "z (2k)=%p\n", z );
-    bassert( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( z )].bin_and_size ) == size_2_bin( 2048 ) );
+    SM_ASSERT( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( z )].bin_and_size ) == size_2_bin( 2048 ) );
 
     for( int i = 0; i < n8; i++ ) { small_free( data8[i] ); }
     for( int i = 0; i < n16; i++ ) { small_free( data16[i] ); }

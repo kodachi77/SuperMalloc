@@ -1,28 +1,28 @@
 require('vstudio')
 
 premake.override(premake.vstudio.vc2010, "buildEvents", function(base, cfg)
-	local write = function (event)
-		local name = event .. "Event"
-		local field = event:lower()
-		local steps = cfg[field .. "commands"]
-		local msg = cfg[field .. "message"]
+    local write = function (event)
+        local name = event .. "Event"
+        local field = event:lower()
+        local steps = cfg[field .. "commands"]
+        local msg = cfg[field .. "message"]
 
-		if #steps > 0 then
-			steps = os.translateCommandsAndPaths(steps, cfg.project.basedir, cfg.project.location, 'windows')
-			for i = 1, #steps do
+        if #steps > 0 then
+            steps = os.translateCommandsAndPaths(steps, cfg.project.basedir, cfg.project.location, 'windows')
+            for i = 1, #steps do
                 steps[i] = path.translate(steps[i])
             end
-			premake.push('<%s>', name)
-			premake.x('<Command>%s</Command>', table.implode(steps, "", "", "\r\n"))
-			if msg then
-				premake.x('<Message>%s</Message>', msg)
-			end
-			premake.pop('</%s>', name)
-		end
+            premake.push('<%s>', name)
+            premake.x('<Command>%s</Command>', table.implode(steps, "", "", "\r\n"))
+            if msg then
+                premake.x('<Message>%s</Message>', msg)
+            end
+            premake.pop('</%s>', name)
+        end
     end
-	write("PreBuild")
-	write("PreLink")
-	write("PostBuild")
+    write("PreBuild")
+    write("PreLink")
+    write("PostBuild")
 end)
 
 newoption {
@@ -33,6 +33,11 @@ newoption {
 newoption {
     trigger = "enable-stats",
     description = "Enable statistics"
+}
+
+newoption {
+    trigger = "do-failed-counts",
+    description = "Enable counting failed aquisitions"
 }
 
 newoption {
@@ -69,7 +74,7 @@ filter { "system:linux" }
     platforms { "linux64" }
     links { "pthread", "dl" }
 
-filter "action:vs*"
+filter { "action:vs*" }
     defines { "_CRT_SECURE_NO_DEPRECATE", "_CRT_SECURE_NO_WARNINGS", "_CRT_NONSTDC_NO_WARNINGS" }
 
 group "SuperMalloc"
@@ -78,27 +83,32 @@ project "supermalloc"
     kind "StaticLib"
     dependson { "objsizes" }
     files { "src/*.cc", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
-    excludes { "src/objsizes.cc", "src/unit-tests.cc", "src/unit-tests.h" }
-    if _OPTIONS["enable-log-check"] then
-        defines { "ENABLE_LOG_CHECKING" }
-    end
-    if _OPTIONS["enable-stats"] then
-        defines { "ENABLE_STATS" }
-    end
+    excludes { "src/objsizes.c", "src/unit-tests.cc", "src/unit-tests.h" }
 
 project "objsizes"
+    language "C"
+    cdialect "C11"
+    -- usestandardpreprocessor "On"
     kind "ConsoleApp"
-    files { "src/objsizes.cc" }
-    postbuildcommands { "%{cfg.buildtarget.abspath:gsub('/', '\\')} src/generated_constants.cxx > src/generated_constants.hxx" }
+    files { "src/objsizes.c" }
+    postbuildcommands { "%{cfg.buildtarget.abspath} src/generated_constants.cxx > src/generated_constants.hxx" }
 
 group "Tests"
 
 project "supermalloc_test"
     kind "ConsoleApp"
     files { "src/*.cc", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
-    excludes { "src/objsizes.cc" }
+    excludes { "src/objsizes.c" }
     defines {"TESTING"}
-    
+    if _OPTIONS["enable-log-check"] then
+        defines { "ENABLE_LOG_CHECKING" }
+    end
+    if _OPTIONS["enable-stats"] then
+        defines { "ENABLE_STATS" }
+    end
+    if _OPTIONS["do-failed-counts"] then
+        defines { "DO_FAILED_COUNTS" }
+    end
     if _OPTIONS["coverage"] then
         filter { "system:linux" }
             buildoptions { "-fprofile-arcs -ftest-coverage" }
@@ -106,14 +116,12 @@ project "supermalloc_test"
             defines { "COVERAGE" }
     end 
 
-
 group "Benchmarks"
 
 project "alloc-test"
     kind "ConsoleApp"
     cppdialect "C++17"
-    files { "benchmarks/alloc-test/*.cpp",
-        "benchmarks/alloc-test/*.h" }
+    files { "benchmarks/alloc-test/*.cpp", "benchmarks/alloc-test/*.h" }
     includedirs { "src" }
     links { "supermalloc" }
 

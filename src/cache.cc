@@ -97,7 +97,7 @@ static INIT_ONCE once_control = INIT_ONCE_STATIC_INIT;
 void
 cache_destructor( void* v )
 {
-    bassert( v == (void*) ( &cache_inited ) );
+    SM_ASSERT( v == (void*) ( &cache_inited ) );
     //unsigned long recovered = 0;
     for( binnumber_t bin = 0; bin < first_huge_bin_number; bin++ )
     {
@@ -220,9 +220,9 @@ try_get_cached_both( CacheForBin* cb, uint64_t siz )
 static void
 assert_equal( const cached_objects* co, uint64_t bytecount, linked_list* h, linked_list* t )
 {
-    bassert( co->bytecount == bytecount );
-    bassert( co->head == h );
-    if( co->head ) { bassert( co->tail == t ); }
+    SM_ASSERT( co->bytecount == bytecount );
+    SM_ASSERT( co->head == h );
+    if( co->head ) { SM_ASSERT( co->tail == t ); }
 }
 
 static void
@@ -231,18 +231,18 @@ test_try_get_cached_both()
     {
         CacheForBin c = { { { 0, NULL, NULL }, { 0, NULL, NULL } } };
         void*       r = try_get_cached_both( &c, 1024 );
-        bassert( r == NULL );
+        SM_ASSERT( r == NULL );
     }
     {
         linked_list item1 = { NULL };
         linked_list item2 = { &item1 };
         CacheForBin c     = { { { 2048, &item2, &item1 }, { 0, NULL, NULL } } };
         void*       r     = try_get_cached_both( &c, 1024 );
-        bassert( r = reinterpret_cast<void*>( &item2 ) );
+        SM_ASSERT( r = reinterpret_cast<void*>( &item2 ) );
         assert_equal( &c.co[0], 1024, &item1, &item1 );
         assert_equal( &c.co[1], 0, NULL, NULL );
         void* r2 = try_get_cached_both( &c, 1024 );
-        bassert( r2 = reinterpret_cast<void*>( &item1 ) );
+        SM_ASSERT( r2 = reinterpret_cast<void*>( &item1 ) );
         assert_equal( &c.co[0], 0, NULL, NULL );
         assert_equal( &c.co[1], 0, NULL, NULL );
     }
@@ -251,11 +251,11 @@ test_try_get_cached_both()
         linked_list item2 = { &item1 };
         CacheForBin c     = { { { 0, NULL, NULL }, { 2048, &item2, &item1 } } };
         void*       r     = try_get_cached_both( &c, 1024 );
-        bassert( r = reinterpret_cast<void*>( &item2 ) );
+        SM_ASSERT( r = reinterpret_cast<void*>( &item2 ) );
         assert_equal( &c.co[1], 1024, &item1, &item1 );
         assert_equal( &c.co[0], 0, NULL, NULL );
         void* r2 = try_get_cached_both( &c, 1024 );
-        bassert( r2 = reinterpret_cast<void*>( &item1 ) );
+        SM_ASSERT( r2 = reinterpret_cast<void*>( &item1 ) );
         assert_equal( &c.co[1], 0, NULL, NULL );
         assert_equal( &c.co[0], 0, NULL, NULL );
     }
@@ -327,7 +327,7 @@ predo_add_a_cache_to_cpu(
     /*const*/ cached_objects*
         co )    // I wanted that to be "const cached_objects &co", but I couldn't make the type system happy.
 {
-    bassert( co->head != NULL );
+    SM_ASSERT( co->head != NULL );
     uint64_t bc0 = cc->co[0].bytecount;
     uint64_t bc1 = cc->co[1].bytecount;
     prefetch_write( cc );
@@ -347,7 +347,7 @@ do_add_a_cache_to_cpu( CacheForBin* cc,
                        /*const*/ cached_objects*
                            co )    // I wanted that to be "const cached_objects &co", but I couldn't make the type system happy.
 {
-    // bassert(co->head != NULL);  This assert was done in the predo, and it won't have changd.
+    // SM_ASSERT(co->head != NULL);  This assert was done in the predo, and it won't have changd.
     uint64_t bc0 = cc->co[0].bytecount;
     uint64_t bc1 = cc->co[1].bytecount;
     if( bc0 == 0 ) { cc->co[0] = *co; }
@@ -382,7 +382,7 @@ test_add_a_cache_to_cpu()
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[0], 1024, &item, &item );
         assert_equal( &cc.co[1], 0, 0, 0 );
-        bassert( item.next == 0 );
+        SM_ASSERT( item.next == 0 );
     }
     {
         linked_list    item2;
@@ -401,10 +401,10 @@ test_add_a_cache_to_cpu()
         cached_objects co    = { 1024, &item, &item };
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[0], 2048, &item2, &item );
-        bassert( item2.next == &item );
-        bassert( item.next == NULL );
+        SM_ASSERT( item2.next == &item );
+        SM_ASSERT( item.next == NULL );
         assert_equal( &cc.co[1], 2048, &item3, &item3 );
-        bassert( item3.next == NULL );
+        SM_ASSERT( item3.next == NULL );
     }
     {
         linked_list    item3 = { 0 };
@@ -414,10 +414,10 @@ test_add_a_cache_to_cpu()
         cached_objects co    = { 1024, &item, &item };
         do_add_a_cache_to_cpu( &cc, &co );
         assert_equal( &cc.co[1], 2048, &item2, &item );
-        bassert( item2.next == &item );
-        bassert( item.next == NULL );
+        SM_ASSERT( item2.next == &item );
+        SM_ASSERT( item.next == NULL );
         assert_equal( &cc.co[0], 2048, &item3, &item3 );
-        bassert( item3.next == NULL );
+        SM_ASSERT( item3.next == NULL );
     }
 }
 #endif
@@ -438,10 +438,10 @@ collect_objects_for_thread_cache( cached_objects* objects, cached_objects* first
         while( bytecount < thread_cache_bytecount_limit )
         {
             bytecount += siz;
-            bassert( ptr );
+            SM_ASSERT( ptr );
             ptr = ptr->next;
         }
-        bassert( ptr );
+        SM_ASSERT( ptr );
         first_n_objects->tail      = ptr;
         first_n_objects->bytecount = bytecount;
         objects->head              = ptr->next;
@@ -519,7 +519,7 @@ try_get_cpu_cached( int processor, binnumber_t bin, uint64_t siz )
             if( tc->co[0].head == NULL ) { tc->co[0] = first_n_objects; }
             else
             {
-                bassert( tc->co[1].head == NULL );
+                SM_ASSERT( tc->co[1].head == NULL );
                 tc->co[1] = first_n_objects;
             }
         }
@@ -626,7 +626,7 @@ cached_malloc( binnumber_t bin )
 //   can do it efficiently), otherwise try the global cache (move a
 //   whole chunk from the global cache to the cpu cache).
 {
-    bassert( bin < first_huge_bin_number );
+    SM_ASSERT( bin < first_huge_bin_number );
     uint64_t siz = bin_2_size( bin );
 
     if( use_threadcache )
@@ -763,7 +763,7 @@ try_put_into_cpu_cache_part( linked_list* obj, cached_objects* tco, cached_objec
     {
         obj->next = tco->head;
 
-        bassert( tco->tail != NULL );
+        SM_ASSERT( tco->tail != NULL );
         tco->tail->next = old_cco_head;
 
         cco->bytecount = old_cco_bytecount + tco->bytecount + siz;
@@ -901,7 +901,7 @@ cached_free( void* ptr, binnumber_t bin )
     //  Else if the global cache is empty enough, add everything from one of the cpucaches (including the ptr), and we are done.
     //  Else really free the pointer.
     clog_command( 'f', ptr, bin );
-    bassert( bin < first_huge_bin_number );
+    SM_ASSERT( bin < first_huge_bin_number );
     uint64_t siz = bin_2_size( bin );
 
     // No lock needed for this.

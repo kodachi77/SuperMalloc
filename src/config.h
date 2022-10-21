@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <inttypes.h>
+//#include <inttypes.h>
 
 #if defined( _MSC_VER )
 
@@ -170,6 +170,7 @@ out:
 #pragma intrinsic( _InterlockedIncrement64 )
 #pragma intrinsic( _InterlockedDecrement64 )
 #pragma intrinsic( _InterlockedOr64 )
+#pragma intrinsic( _InterlockedOr )
 #pragma intrinsic( _InterlockedExchangePointer )
 
 template <typename T>
@@ -184,10 +185,13 @@ atomic_store( void* ptr, uintptr_t val )
 {
     _InterlockedExchangePointer( (void* volatile*) ptr, (void*) val );
 }
+#define __sync_fetch_and_or( a, b )                                                                                              \
+    sizeof( *( a ) ) == sizeof( int64_t ) ? InterlockedOr64( (volatile int64_t*) ( a ), int64_t( b ) ) :                         \
+                                            InterlockedOr( (volatile long*) ( a ), long( b ) )
 
 #define __sync_fetch_and_add( a, b )                                                                                             \
-    sizeof( *a ) == sizeof( int64_t ) ? InterlockedExchangeAdd64( (volatile int64_t*) ( a ), int64_t( b ) ) :                    \
-                                        InterlockedExchangeAdd( (volatile long*) ( a ), (long) ( b ) )
+    sizeof( *( a ) ) == sizeof( int64_t ) ? InterlockedExchangeAdd64( (volatile int64_t*) ( a ), int64_t( b ) ) :                \
+                                            InterlockedExchangeAdd( (volatile long*) ( a ), (long) ( b ) )
 
 static inline bool
 __sync_bool_compare_and_swap( uint64_t volatile* dst, uint64_t oldl, uint64_t newl )

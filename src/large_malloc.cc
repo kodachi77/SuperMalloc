@@ -42,7 +42,7 @@ large_object_list_cell*
 do_large_malloc_pop( large_object_list_cell** free_head )
 {
     large_object_list_cell* h = *free_head;
-    if( 0 ) printf( " dlmp: h=%p\n", h );
+    SM_LOG_DEBUG( " dlmp: h=%p\n", h );
     if( h == NULL ) { return NULL; }
     else
     {
@@ -60,12 +60,12 @@ large_malloc( size_t size )
 //  hugepages.  But for now it doesn't matter which page we use, since
 //  for these pages we disable hugepages.)
 {
-    if( 0 ) printf( "large_malloc(%" PRIu64 "):\n", size );
+    SM_LOG_DEBUG( "large_malloc(%" PRIu64 "):\n", size );
     uint32_t    footprint   = static_cast<uint32_t>( pagesize * ceil( size, pagesize ) );
     binnumber_t b           = size_2_bin( size );
     size_t      usable_size = bin_2_size( b );
-    bassert( b >= first_large_bin_number );
-    bassert( b < first_huge_bin_number );
+    SM_ASSERT( b >= first_large_bin_number );
+    SM_ASSERT( b < first_huge_bin_number );
 
     large_object_list_cell** free_head = &free_large_objects[b - first_large_bin_number];
 
@@ -76,7 +76,7 @@ large_malloc( size_t size )
         // It cannot be done with a compare-and-swap since we read two locations that
         // are visible to other threads (getting h, and getting h->next).
         large_object_list_cell* h = *free_head;
-        if( 0 ) printf( "h==%p\n", h );
+        SM_LOG_DEBUG( "h==%p\n", h );
         if( h != NULL )
         {
             if( 0 )
@@ -96,18 +96,18 @@ large_malloc( size_t size )
             // that was the atomic part.
             h->footprint = footprint;
             add_to_footprint( footprint );
-            if( 0 ) printf( "setting its footprint to %d\n", h->footprint );
-            if( 0 ) printf( "returning the page corresponding to %p\n", h );
+            SM_LOG_DEBUG( "setting its footprint to %d\n", h->footprint );
+            SM_LOG_DEBUG( "returning the page corresponding to %p\n", h );
             void* chunk = address_2_chunkaddress( h );
-            if( 0 ) printf( "chunk=%p\n", chunk );
+            SM_LOG_DEBUG( "chunk=%p\n", chunk );
             large_object_list_cell* chunk_as_list_cell = reinterpret_cast<large_object_list_cell*>( chunk );
             size_t                  offset             = h - chunk_as_list_cell;
-            if( 0 ) printf( "offset=%" PRIu64 "\n", offset );
+            SM_LOG_DEBUG( "offset=%" PRIu64 "\n", offset );
             void* address = reinterpret_cast<void*>( reinterpret_cast<char*>( chunk ) + offset_of_first_object_in_large_chunk
                                                      + offset * usable_size );
-            bassert( address_2_chunknumber( address ) == address_2_chunknumber( chunk ) );
-            if( 0 ) printf( "result=%p\n", address );
-            bassert( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( address )].bin_and_size ) == b );
+            SM_ASSERT( address_2_chunknumber( address ) == address_2_chunknumber( chunk ) );
+            SM_LOG_DEBUG( "result=%p\n", address );
+            SM_ASSERT( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( address )].bin_and_size ) == b );
             log_command( 'a', address );
             return address;
         }
@@ -115,23 +115,23 @@ large_malloc( size_t size )
         {
             // No already free objects.  Get a chunk
             void* chunk = mmap_chunk_aligned_block( 1 );
-            bassert( chunk );
-            if( 0 ) printf( "chunk=%p\n", chunk );
+            SM_ASSERT( chunk );
+            SM_LOG_DEBUG( "chunk=%p\n", chunk );
 
-            if( 0 ) printf( "usable_size=%" PRIu64 "\n", usable_size );
+            SM_LOG_DEBUG( "usable_size=%" PRIu64 "\n", usable_size );
             size_t objects_per_chunk =
                 ( chunksize - offset_of_first_object_in_large_chunk )
                 / usable_size;    // Should use magic for this, but it's already got an mmap(), so it doesn't matter
-            if( 0 ) printf( "opce=%" PRIu64 "\n", objects_per_chunk );
+            SM_LOG_DEBUG( "opce=%" PRIu64 "\n", objects_per_chunk );
             size_t size_of_header = objects_per_chunk * sizeof( large_object_list_cell );
-            if( 0 ) printf( "soh=%" PRIu64 "\n", size_of_header );
-            bassert( size_of_header <= offset_of_first_object_in_large_chunk );
+            SM_LOG_DEBUG( "soh=%" PRIu64 "\n", size_of_header );
+            SM_ASSERT( size_of_header <= offset_of_first_object_in_large_chunk );
 
             large_object_list_cell* entry = (large_object_list_cell*) chunk;
             for( size_t i = 0; i + 1 < objects_per_chunk; i++ ) { entry[i].next = &entry[i + 1]; }
 
             bin_and_size_t b_and_s = bin_and_size_to_bin_and_size( b, footprint );
-            bassert( b_and_s != 0 );
+            SM_ASSERT( b_and_s != 0 );
             chunknumber_t chunknum = address_2_chunknumber( chunk );
             commit_ci_page_as_needed( chunknum );
             chunk_infos[chunknum].bin_and_size = b_and_s;
@@ -154,7 +154,7 @@ large_malloc( size_t size )
                 }
             }
 
-            if( 0 ) printf( "Got object\n" );
+            SM_LOG_DEBUG( "Got object\n" );
         }
     }
 }
@@ -162,21 +162,21 @@ large_malloc( size_t size )
 size_t
 large_footprint( void* p )
 {
-    if( 0 ) printf( "large_footprint(%p):\n", p );
+    SM_LOG_DEBUG( "large_footprint(%p):\n", p );
     bin_and_size_t b_and_s = chunk_infos[address_2_chunknumber( p )].bin_and_size;
-    bassert( b_and_s != 0 );
+    SM_ASSERT( b_and_s != 0 );
     binnumber_t bin = bin_from_bin_and_size( b_and_s );
-    bassert( first_large_bin_number <= bin );
-    bassert( bin < first_huge_bin_number );
+    SM_ASSERT( first_large_bin_number <= bin );
+    SM_ASSERT( bin < first_huge_bin_number );
     uint64_t usable_size = bin_2_size( bin );
     uint64_t offset      = offset_in_chunk( p );
     uint64_t objnum      = ( offset - offset_of_first_object_in_large_chunk ) / usable_size;
-    if( 0 ) printf( "objnum %p is in bin %d, usable_size=%" PRIu64 ", objnum=%" PRIu64 "\n", p, bin, usable_size, objnum );
+    SM_LOG_DEBUG( "objnum %p is in bin %d, usable_size=%" PRIu64 ", objnum=%" PRIu64 "\n", p, bin, usable_size, objnum );
     large_object_list_cell* entries = reinterpret_cast<large_object_list_cell*>( address_2_chunkaddress( p ) );
 
-    if( 0 ) printf( "entries are %p\n", entries );
+    SM_LOG_DEBUG( "entries are %p\n", entries );
     uint32_t footprint = entries[objnum].footprint;
-    if( 0 ) printf( "footprint=%u\n", footprint );
+    SM_LOG_DEBUG( "footprint=%u\n", footprint );
     return footprint;
 }
 
@@ -185,9 +185,9 @@ large_free( void* p )
 {
     log_command( 'f', p );
     bin_and_size_t b_and_s = chunk_infos[address_2_chunknumber( p )].bin_and_size;
-    bassert( b_and_s != 0 );
+    SM_ASSERT( b_and_s != 0 );
     binnumber_t bin = bin_from_bin_and_size( b_and_s );
-    bassert( first_large_bin_number <= bin && bin < first_huge_bin_number );
+    SM_ASSERT( first_large_bin_number <= bin && bin < first_huge_bin_number );
     uint64_t usable_size = bin_2_size( bin );
 
     madvise( p, usable_size, MADV_DONTNEED );
@@ -197,7 +197,7 @@ large_free( void* p )
     if( IS_TESTING )
     {
         uint64_t objnum2 = ( offset - offset_of_first_object_in_large_chunk ) / usable_size;
-        bassert( objnum == objnum2 );
+        SM_ASSERT( objnum == objnum2 );
     }
     large_object_list_cell* entries   = reinterpret_cast<large_object_list_cell*>( address_2_chunkaddress( p ) );
     uint32_t                footprint = entries[objnum].footprint;
@@ -229,87 +229,87 @@ test_large_malloc( void )
     int64_t fp    = get_footprint();
     {
         void* x = large_malloc( msize );
-        bassert( x );
-        bassert( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk );
+        SM_ASSERT( x );
+        SM_ASSERT( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk );
 
         void* y = large_malloc( msize );
-        bassert( y );
-        bassert( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + msize );
+        SM_ASSERT( y );
+        SM_ASSERT( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + msize );
 
         size_t fy = large_footprint( y );
-        bassert( fy == msize );
+        SM_ASSERT( fy == msize );
 
-        bassert( get_footprint() - fp == (int64_t) ( 2 * msize ) );
+        SM_ASSERT( get_footprint() - fp == (int64_t) ( 2 * msize ) );
 
         large_free( x );
         void* z = large_malloc( msize );
-        bassert( z == x );
+        SM_ASSERT( z == x );
 
         large_free( z );
         large_free( y );
     }
 
-    bassert( get_footprint() - fp == 0 );
+    SM_ASSERT( get_footprint() - fp == 0 );
     {
         void* x = large_malloc( 2 * msize );
-        bassert( x );
-        bassert( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk + 0 * msize );
+        SM_ASSERT( x );
+        SM_ASSERT( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk + 0 * msize );
 
-        bassert( get_footprint() - fp == (int64_t) ( 2 * msize ) );
+        SM_ASSERT( get_footprint() - fp == (int64_t) ( 2 * msize ) );
 
         void* y = large_malloc( 2 * msize );
-        bassert( y );
-        bassert( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + 2 * msize );
+        SM_ASSERT( y );
+        SM_ASSERT( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + 2 * msize );
 
-        bassert( get_footprint() - fp == (int64_t) ( 4 * msize ) );
+        SM_ASSERT( get_footprint() - fp == (int64_t) ( 4 * msize ) );
 
         large_free( x );
         void* z = large_malloc( 2 * msize );
-        bassert( z == x );
+        SM_ASSERT( z == x );
 
         large_free( z );
         large_free( y );
     }
-    bassert( get_footprint() - fp == 0 );
+    SM_ASSERT( get_footprint() - fp == 0 );
     {
         void* x = large_malloc( largest_large );
-        bassert( x );
-        bassert( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk + 0 * largest_large );
+        SM_ASSERT( x );
+        SM_ASSERT( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk + 0 * largest_large );
 
         void* y = large_malloc( largest_large );
-        bassert( y );
-        bassert( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + 1 * largest_large );
+        SM_ASSERT( y );
+        SM_ASSERT( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + 1 * largest_large );
 
         large_free( x );
         void* z = large_malloc( largest_large );
-        bassert( z == x );
+        SM_ASSERT( z == x );
 
         large_free( z );
         large_free( y );
     }
-    bassert( get_footprint() - fp == 0 );
+    SM_ASSERT( get_footprint() - fp == 0 );
     {
         size_t s = 100 * 4096;
-        if( 0 ) printf( "s=%" PRIu64 "\n", s );
+        SM_LOG_DEBUG( "s=%" PRIu64 "\n", s );
 
         void* x = large_malloc( s );
-        bassert( x );
-        bassert( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk + 0 * msize );
+        SM_ASSERT( x );
+        SM_ASSERT( offset_in_chunk( x ) == offset_of_first_object_in_large_chunk + 0 * msize );
 
-        bassert( large_footprint( x ) == s );
+        SM_ASSERT( large_footprint( x ) == s );
 
-        bassert( get_footprint() - fp == static_cast<int64_t>( s ) );
+        SM_ASSERT( get_footprint() - fp == static_cast<int64_t>( s ) );
 
         void* y = large_malloc( s );
-        bassert( y );
-        bassert( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + bin_2_size( size_2_bin( s ) ) );
+        SM_ASSERT( y );
+        SM_ASSERT( offset_in_chunk( y ) == offset_of_first_object_in_large_chunk + bin_2_size( size_2_bin( s ) ) );
 
-        bassert( large_footprint( y ) == s );
+        SM_ASSERT( large_footprint( y ) == s );
 
         large_free( x );
         large_free( y );
     }
-    bassert( get_footprint() - fp == 0 );
+    SM_ASSERT( get_footprint() - fp == 0 );
 }
 
 #ifdef ENABLE_LOG_CHECKING

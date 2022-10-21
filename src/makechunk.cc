@@ -35,20 +35,20 @@ mmap_size( size_t size )
     return r;
 
     // This is the old code...
-    bassert( r != NULL );
+    SM_ASSERT( r != NULL );
     if( r == MAP_FAILED )
     {
         fprintf( stderr, " Total mapped so far = %ld, size = %ld\n", total_mapped, size );
         perror( "Map failed" );
     }
-    bassert( r != MAP_FAILED );
+    SM_ASSERT( r != MAP_FAILED );
 #elif defined( _WIN64 )
     DWORD flag = 0;
     // FIXME: if( size > ::GetLargePageMinimum() ) flag |= MEM_LARGE_PAGES; /* this causes some issues in madvise */
     void* r = ::VirtualAlloc( NULL, size, flag | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
     if( !r )
     {
-        fprintf( stderr, " VirtualAlloc failed. Error = %d\n", GetLastError() );
+        SM_LOG_FATAL(" VirtualAlloc failed. Error = %d\n", GetLastError() );
         return NULL;
     }
 
@@ -65,12 +65,12 @@ unmap( void* p, size_t size )
     if( size > 0 )
     {
         int r = munmap( p, size );
-        if( 1 && r != 0 )
+        if( r != 0 )
         {
             fprintf( stderr, "Failure doing munmap(%p, %ld) error=%d\n", p, size, errno );
             abort();
         }
-        bassert( r == 0 );
+        SM_ASSERT( r == 0 );
         __sync_fetch_and_add( &mismapped_so_unmapped, size );
     }
 #elif defined( _WIN64 )
@@ -104,7 +104,7 @@ mmap_allocate_space( size_t size )
     void* r = ::VirtualAlloc( NULL, size, flag | MEM_RESERVE, PAGE_READWRITE );
     if( !r )
     {
-        fprintf( stderr, " VirtualAlloc failed. Error = %d\n", GetLastError() );
+        SM_LOG_FATAL( " VirtualAlloc failed. Error = %d\n", GetLastError() );
         return NULL;
     }
 
@@ -116,9 +116,9 @@ mmap_allocate_space( size_t size )
 void
 mmap_commit_page( void* ptr, size_t size )
 {
+    // VirtualAlloc cannot reserve a reserved page. It can commit a page that is already committed.
     void* r = ::VirtualAlloc( ptr, size, MEM_COMMIT, PAGE_READWRITE );
-    if( !r ) { fprintf( stderr, " VirtualAlloc failed. Error = %d\n", GetLastError() ); }
-
+    if( !r ) { SM_LOG_FATAL( " VirtualAlloc failed. Error = %d\n", GetLastError() ); }
     //__sync_fetch_and_add( &total_mapped, size );
 }
 
@@ -191,40 +191,40 @@ test_makechunk( void )
 {
     {
         void* v = mmap_size( 4096 );
-        bassert( v );
+        SM_ASSERT( v );
         unmap( v, 4096 );
         unmap( NULL, 0 );
     }
     {
         void* v = mmap_chunk_aligned_block( 1 );
-        bassert( v );
-        bassert( offset_in_chunk( v ) == 0 );
+        SM_ASSERT( v );
+        SM_ASSERT( offset_in_chunk( v ) == 0 );
         unmap( v, 1 * chunksize );
     }
 
     // Test chunk_create_slow
     {
         void* v = chunk_create_slow( 3 );
-        bassert( v );
-        bassert( offset_in_chunk( v ) == 0 );
+        SM_ASSERT( v );
+        SM_ASSERT( offset_in_chunk( v ) == 0 );
         void* w = chunk_create_slow( 3 );
-        bassert( w );
-        bassert( offset_in_chunk( w ) == 0 );
+        SM_ASSERT( w );
+        SM_ASSERT( offset_in_chunk( w ) == 0 );
         unmap( v, 3 * chunksize );
         unmap( w, 3 * chunksize );
     }
     {
         void* p = mmap_size( 4096 );
         void* w = chunk_create_slow( 3 );
-        bassert( p );
-        bassert( w );
-        bassert( offset_in_chunk( w ) == 0 );
+        SM_ASSERT( p );
+        SM_ASSERT( w );
+        SM_ASSERT( offset_in_chunk( w ) == 0 );
     }
     {
         void* p = mmap_size( chunksize - 4096 );
         void* w = chunk_create_slow( 3 );
-        bassert( p );
-        bassert( w );
-        bassert( offset_in_chunk( w ) == 0 );
+        SM_ASSERT( p );
+        SM_ASSERT( w );
+        SM_ASSERT( offset_in_chunk( w ) == 0 );
     }
 }

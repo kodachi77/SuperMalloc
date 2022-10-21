@@ -113,7 +113,7 @@ get_power_of_two_n_chunks( chunknumber_t n_chunks )
         put_cached_power_of_two_chunks( c, bit );
         c += ( 1 << bit );
     }
-    bassert( result );
+    SM_ASSERT( result );
     return result;
 }
 
@@ -155,7 +155,7 @@ huge_malloc( size_t size )
     chunknumber_t  chunknum = address_2_chunknumber( c );
     binnumber_t    bin      = size_2_bin( n_chunks * chunksize );
     bin_and_size_t b_and_s  = bin_and_size_to_bin_and_size( bin, size );
-    bassert( b_and_s != 0 );
+    SM_ASSERT( b_and_s != 0 );
     commit_ci_page_as_needed( chunknum );
     chunk_infos[chunknum].bin_and_size = b_and_s;
     return c;
@@ -167,20 +167,20 @@ huge_free( void* m )
     // huge_free() is required to tolerate m being any pointer into the chunk returned by huge_malloc.
     // However this code cannot really tolerate i.
     m = reinterpret_cast<void*>( reinterpret_cast<uint64_t>( m ) & ~4095 );
-    bassert( ( reinterpret_cast<uint64_t>( m ) & ( chunksize - 1 ) ) == 0 );
+    SM_ASSERT( ( reinterpret_cast<uint64_t>( m ) & ( chunksize - 1 ) ) == 0 );
     chunknumber_t cn = address_2_chunknumber( m );
-    bassert( cn );
+    SM_ASSERT( cn );
     bin_and_size_t bnt = chunk_infos[cn].bin_and_size;
-    bassert( bnt != 0 );
+    SM_ASSERT( bnt != 0 );
     binnumber_t   bin   = bin_from_bin_and_size( bnt );
     uint64_t      siz   = bin_2_size( bin );
     chunknumber_t csiz  = static_cast<uint32_t>( ceil( siz, chunksize ) );
     uint64_t      hceil = hyperceil( csiz );
     uint32_t      hlog  = lg_of_power_of_two( hceil );
-    bassert( hlog < log_max_chunknumber );
+    SM_ASSERT( hlog < log_max_chunknumber );
     {
         int r = madvise( m, siz, MADV_DONTNEED );
-        bassert( r == 0 );    // Should we really check this?
+        SM_ASSERT( r == 0 );    // Should we really check this?
     }
     put_cached_power_of_two_chunks( cn, hlog );
 }
@@ -197,70 +197,70 @@ test_huge_malloc( void )
     if( print ) printf( "temp=%p\n", temp );
 
     void* a = huge_malloc( largest_large + 1 );
-    bassert( reinterpret_cast<uint64_t>( a ) % chunksize == 0 );
+    SM_ASSERT( reinterpret_cast<uint64_t>( a ) % chunksize == 0 );
     chunknumber_t a_n = address_2_chunknumber( a );
     if( print ) printf( "a=%p a_n=0x%x\n", a, a_n );
-    bassert( bin_from_bin_and_size( chunk_infos[a_n].bin_and_size ) >= first_huge_bin_number );
+    SM_ASSERT( bin_from_bin_and_size( chunk_infos[a_n].bin_and_size ) >= first_huge_bin_number );
     *(char*) a = 1;
 
     void* b = huge_malloc( largest_large + 2 );
-    bassert( offset_in_chunk( b ) == 0 );
+    SM_ASSERT( offset_in_chunk( b ) == 0 );
     chunknumber_t b_n = address_2_chunknumber( b );
     if( print ) printf( "b=%p diff=0x%tx a_n-b_n=%d\n", b, ptrdiff_t( (char*) a - (char*) b ), (int) a_n - (int) b_n );
-    bassert( bin_from_bin_and_size( chunk_infos[b_n].bin_and_size ) == first_huge_bin_number );
+    SM_ASSERT( bin_from_bin_and_size( chunk_infos[b_n].bin_and_size ) == first_huge_bin_number );
 
     void* c = huge_malloc( 2 * chunksize );
-    bassert( offset_in_chunk( c ) == 0 );
+    SM_ASSERT( offset_in_chunk( c ) == 0 );
     chunknumber_t c_n = address_2_chunknumber( c );
     if( print )
         printf( "c=%p diff=0x%tx bin = %u,%u b_n=%d c_n=%d\n", c, ptrdiff_t( (char*) b - (char*) c ),
                 bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ), chunk_infos[c_n].bin_and_size >> 7, b_n, c_n );
-    bassert( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
+    SM_ASSERT( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 
     void* d = huge_malloc( 2 * chunksize );
-    bassert( reinterpret_cast<uint64_t>( d ) % chunksize == 0 );
+    SM_ASSERT( reinterpret_cast<uint64_t>( d ) % chunksize == 0 );
     chunknumber_t d_n = address_2_chunknumber( d );
     if( print ) printf( "d=%p c_n=%d d_n=%d diff=%d abs=%d\n", d, c_n, d_n, c_n - d_n, (int) std::abs( (int) c_n - (int) d_n ) );
-    bassert( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
+    SM_ASSERT( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 
     // Now make sure that a, b, c, d are allocated with no overlaps.
-    bassert( abs( long( a_n - b_n ) ) >= 1 );    // a and b must be separated by 1
-    bassert( abs( long( a_n - c_n ) ) >= 2 );    // a and c must be separated by 2
-    bassert( abs( long( a_n - d_n ) ) >= 2 );    // a and d must be separated by 2
-    bassert( abs( long( b_n - c_n ) ) >= 2 );    // b and c must be separated by 2
-    bassert( abs( long( b_n - d_n ) ) >= 2 );    // a and d must be separated by 2
-    bassert( abs( long( c_n - d_n ) ) >= 2 );    // c and d must be separated by 2
+    SM_ASSERT( abs( long( a_n - b_n ) ) >= 1 );    // a and b must be separated by 1
+    SM_ASSERT( abs( long( a_n - c_n ) ) >= 2 );    // a and c must be separated by 2
+    SM_ASSERT( abs( long( a_n - d_n ) ) >= 2 );    // a and d must be separated by 2
+    SM_ASSERT( abs( long( b_n - c_n ) ) >= 2 );    // b and c must be separated by 2
+    SM_ASSERT( abs( long( b_n - d_n ) ) >= 2 );    // a and d must be separated by 2
+    SM_ASSERT( abs( long( c_n - d_n ) ) >= 2 );    // c and d must be separated by 2
 
     {
         chunknumber_t m1_n = address_2_chunknumber( reinterpret_cast<void*>( -1 ) );
         if( print ) printf( "-1 ==> 0x%x (1<<27)-1=%llx\n", m1_n, ( 1ull << 26 ) - 1 );
-        bassert( m1_n == ( 1ull << 27 ) - 1 );
+        SM_ASSERT( m1_n == ( 1ull << 27 ) - 1 );
         if( print ) printf( "-1 ==> 0x%x\n", m1_n );
     }
 
     {
         chunknumber_t zero_n = address_2_chunknumber( reinterpret_cast<void*>( 0 ) );
         if( print ) printf( "0 ==> 0x%x (1<<27)-1=%llx\n", zero_n, ( 1ull << 26 ) - 1 );
-        bassert( zero_n == 0 );
+        SM_ASSERT( zero_n == 0 );
         if( print ) printf( "-1 ==> 0x%x\n", zero_n );
     }
 
     huge_free( a );
     void* a_again = huge_malloc( largest_large + 1 );
     if( print ) printf( "a=%p a_again=%p\n", a, a_again );
-    bassert( a == a_again );
+    SM_ASSERT( a == a_again );
 
     huge_free( a_again );
     huge_free( b );
     void* b_again      = huge_malloc( largest_large + 2 );
     void* a_againagain = huge_malloc( largest_large + 1 );
     if( print ) printf( "a=%p b=%p a_again=%p b_again=%p\n", a, b, a_again, b_again );
-    bassert( b == b_again );
-    bassert( a == a_againagain );
+    SM_ASSERT( b == b_again );
+    SM_ASSERT( a == a_againagain );
 
     huge_free( d );
     void* d_again = huge_malloc( 2 * chunksize );
-    bassert( d == d_again );
+    SM_ASSERT( d == d_again );
 
     // Make sure the chunk cache works right when we ask for a different size.
     // Recall that the reason we do the bookkeeping separately after the chunks are
@@ -269,15 +269,15 @@ test_huge_malloc( void )
     void* e = huge_malloc( 5 * chunksize );
     huge_free( e );
     void* eagain = huge_malloc( 8 * chunksize );
-    bassert( e == eagain );
+    SM_ASSERT( e == eagain );
     huge_free( e );
 
     void* f = huge_malloc( 5 * chunksize + 1 );
-    bassert( f == e );
+    SM_ASSERT( f == e );
     huge_free( f );
 
     huge_free( a_againagain );
     void* g = huge_malloc( chunksize - 4096 );
-    bassert( g == a_againagain );
+    SM_ASSERT( g == a_againagain );
 }
 #endif

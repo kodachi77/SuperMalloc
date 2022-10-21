@@ -48,8 +48,8 @@ class SuperMallocAllocatorForTest
     static constexpr const char* name() { return "SuperMalloc allocator"; }
 
     void  init() {}
-    void* allocate( size_t sz ) { return super_malloc( sz ); }
-    void  deallocate( void* ptr ) { super_free( ptr ); }
+    void* allocate( size_t sz ) { return sm_malloc( sz ); }
+    void  deallocate( void* ptr ) { sm_free( ptr ); }
     void  deinit() {}
 
     // next calls are to get additional stats of the allocator, etc, if desired

@@ -1,12 +1,3 @@
-
-#if defined( USE_HOARD ) && defined( _WIN32 )
-#pragma comment( lib, "libhoard.lib" )
-#endif
-
-#if defined( USE_RX ) && defined( _WIN32 )
-#pragma comment( lib, "libmi.lib" )
-#endif
-
 #include <assert.h>
 #include <stdio.h>
 
@@ -18,6 +9,21 @@
 #include <conio.h>
 #include <process.h>
 #include <windows.h>
+
+static inline bool
+__sync_bool_compare_and_swap( unsigned long volatile* dst, unsigned long oldi, unsigned long newi )
+{
+    int original = InterlockedCompareExchange( (volatile long*) dst, (long) newi, (long) oldi );
+    return ( original == oldi );
+}
+#define __ATOMIC_CONSUME 0
+#pragma intrinsic( _InterlockedOr )
+
+static inline unsigned long
+__atomic_load_n( unsigned long* ptr, int /* memorder */ )
+{
+    return unsigned long( _InterlockedOr( (volatile long*) ptr, 0 ) );
+}
 
 #else
 #include <sys/resource.h>
@@ -160,8 +166,8 @@ void operator delete[](void *pUserData )
 #include "supermalloc.h"
 
 #ifndef CUSTOM_MALLOC
-#define CUSTOM_MALLOC super_malloc
-#define CUSTOM_FREE   super_free
+#define CUSTOM_MALLOC sm_malloc
+#define CUSTOM_FREE   sm_free
 #endif
 
 /* Test driver for memory allocators           */
@@ -178,6 +184,10 @@ struct lran2_st
 
 int TotalAllocs = 0;
 
+struct variance_sum
+{
+    unsigned long Ex, Ex2, n;
+};
 typedef struct thr_data
 {
     int threadno;
@@ -198,6 +208,9 @@ typedef struct thr_data
 
     volatile int    finished;
     struct lran2_st rgen;
+
+    struct variance_sum vsum;
+
 
 } thread_data;
 
@@ -232,6 +245,26 @@ extern "C"
     extern HANDLE crtheap;
 };
 #endif
+#if defined(__linux__)
+static long getmaxrss(void) {
+    struct rusage ru;
+    int r __attribute__((unused)) = getrusage(RUSAGE_SELF, &ru);
+    assert(r==0);
+    return ru.ru_maxrss;
+}
+#else
+static long
+getmaxrss( void )
+{
+    return 0;
+}
+#endif
+const bool time_variance = true;
+unsigned long slowest = 0;
+unsigned long slow_count = 0;
+const int n_slow_instance = 100;
+unsigned long slow_instance[n_slow_instance];
+static double get_variance(void);
 
 int
 main( int argc, char* argv[] )
@@ -279,6 +312,8 @@ main( int argc, char* argv[] )
         seed        = atoi( argv[6] );
         max_threads = atoi( argv[7] );
         min_threads = max_threads;
+    printf ("sleep = %ld, min = %d, max = %d, per thread = %d, num rounds = %d, seed = %d, max_threads = %d, min_threads = %d\n",
+	    sleep_cnt, min_size, max_size, chperthread, num_rounds, seed, max_threads, min_threads);
         goto DoneWithInput;
     }
 
@@ -357,6 +392,47 @@ fprintf(stderr, "maxrss=%ld slowest=%ld sqrt(variance)=%f\nslows(%lu)={", getmax
 
 } /* main */
 
+struct variance_sum global_vsum = {0,0,0};
+
+static double get_variance(void) {
+  unsigned long Ex = global_vsum.Ex;
+  unsigned long Ex2 = global_vsum.Ex2;
+  double s2 = ((double)(Ex*Ex))/slow_count;
+  return (Ex2 - s2)/global_vsum.n;
+}
+
+
+static char *my_malloc(size_t size, struct variance_sum *vs) {
+  struct timespec start,end;
+  if (time_variance) {
+    clock_gettime(CLOCK_MONOTONIC, &start);
+  }
+  char * result = (char *) CUSTOM_MALLOC(size);
+  if (time_variance) {
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    unsigned long diff = (end.tv_sec - start.tv_sec)*1000000000 + (end.tv_nsec - start.tv_nsec);
+    if (diff > 1000) {
+      int c = __sync_fetch_and_add(&slow_count, 1);
+      if (c < n_slow_instance) {
+	slow_instance[c] = diff;
+      }
+    }
+    // Compute variance:
+    vs->Ex+=diff;
+    vs->Ex2+=diff*diff;
+    vs->n++;
+    while (1) { // store max atomically
+      unsigned long slowest_v = __atomic_load_n(&slowest, __ATOMIC_CONSUME);
+      if (slowest_v > diff) break;
+      if (__sync_bool_compare_and_swap(&slowest, slowest_v, diff)) break;
+    }
+  }
+  for (size_t i = 0; i < size; i++) {
+    result[i] = i;
+  }
+  return result;
+}
+
 void
 runloops( long sleep_cnt, int num_chunks )
 {
@@ -388,7 +464,7 @@ runloops( long sleep_cnt, int num_chunks )
 #ifdef CPP
         blkp[cblks] = new char[blk_size];
 #else
-        blkp[cblks] = (char*) CUSTOM_MALLOC( blk_size );
+    blkp[cblks] = (char *) my_malloc(blk_size, &global_vsum) ;
 #endif
         blksize[cblks] = blk_size;
         assert( blkp[cblks] != NULL );
@@ -417,7 +493,7 @@ runloops( long sleep_cnt, int num_chunks )
 #if defined( CPP )
             blkp[victim] = new char[blk_size];
 #else
-            blkp[victim] = (char*) CUSTOM_MALLOC( blk_size );
+      blkp[victim] = (char *) my_malloc(blk_size, &global_vsum) ;
 #endif
             blksize[victim] = blk_size;
             assert( blkp[victim] != NULL );
@@ -472,7 +548,7 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
     QueryPerformanceFrequency( &ticks_per_sec );
 
     pdea = &de_area[0];
-    memset( &de_area[0], 0, sizeof( thread_data ) );
+    memset( pdea, 0, sizeof( thread_data ) );
 
     prevthreads = 0;
     for( num_threads = min_threads; num_threads <= max_threads; num_threads++ )
@@ -498,7 +574,7 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
             de_area[i].cFrees   = 0;
             de_area[i].cThreads = 0;
             de_area[i].finished = FALSE;
-            de_area[i].vsum        = (struct variance_sum){0,0,0};
+            de_area[i].vsum     = { 0, 0, 0 };    //(struct variance_sum){0,0,0};
             lran2_init( &de_area[i].rgen, de_area[i].seed );
 
 #ifdef __WIN32__
@@ -624,7 +700,7 @@ exercise_heap( void* pinput )
 #ifdef CPP
         pdea->array[victim] = new char[blk_size];
 #else
-        pdea->array[victim] = (char*) CUSTOM_MALLOC( blk_size );
+    pdea->array[victim] = (char *) my_malloc(blk_size, &pdea->vsum) ;
 #endif
 
         pdea->blksize[victim] = blk_size;
@@ -636,7 +712,9 @@ exercise_heap( void* pinput )
 
         volatile char* chptr = ( (char*) pdea->array[victim] );
         *chptr++             = 'a';
-        volatile char ch     = *( (char*) pdea->array[victim] );
+        // This read doesn't do anything in a modern compiler.  Do an atomic load instead.
+        //volatile char ch     = *( (char*) pdea->array[victim] );
+		__atomic_load_n(((char *) pdea->array[victim]), __ATOMIC_CONSUME);
         *chptr               = 'b';
 
         if( stopflag ) break;
@@ -686,7 +764,7 @@ warmup( char** blkp, int num_chunks )
 #ifdef CPP
         blkp[cblks] = new char[blk_size];
 #else
-        blkp[cblks] = (char*) CUSTOM_MALLOC( blk_size );
+    blkp[cblks] = (char *) my_malloc(blk_size, &global_vsum) ;
 #endif
         blksize[cblks] = blk_size;
         assert( blkp[cblks] != NULL );
