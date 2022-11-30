@@ -5,20 +5,20 @@
 #include <sys/mman.h>
 #endif
 
-#include <algorithm>
-#include <cerrno>
-#include <cstddef>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
 #ifdef TESTING
-#include <cstdio>
+#include <stdio.h>
 #endif
 
 #include "atomically.h"
-#include "bassert.h"
-#include "cpucores.h"
 #include "generated_constants.hxx"
+#include "sm_assert.h"
+#include "sm_os.h"
 
 #define PREFIX sm_
 
@@ -39,11 +39,18 @@
 #define REALLOC            PREFIXIFY( realloc )
 #define MALLOC_USABLE_SIZE PREFIXIFY( malloc_usable_size )
 
-extern "C" size_t MALLOC_USABLE_SIZE( const void* ptr );
+#ifdef __cplusplus
+extern "C"
+#endif
+    size_t
+    MALLOC_USABLE_SIZE( const void* ptr );
 
 #ifdef TESTING
-extern "C" void
-test_size_2_bin( void )
+#ifdef __cplusplus
+extern "C"
+#endif
+    void
+    test_size_2_bin( void )
 {
     for( size_t i = 8; i <= largest_large; i++ )
     {
@@ -82,17 +89,21 @@ test_size_2_bin( void )
 }
 #endif
 
-static unsigned int initialize_lock = 0;
-struct chunk_info*  chunk_infos;
+static _Atomic atomic_int32 initialize_lock = 0;
+chunk_info*                 chunk_infos;
 
-const size_t n_elts                    = 1ull << 27;
-uint32_t     ci_bitfields[n_elts / 32] = {};
-uint32_t     n_cores;
+enum
+{
+    n_elts = 1ull << 27
+};
 
-#ifdef DO_FAILED_COUNTS
+_Atomic uint32_t ci_bitfields[n_elts / 32] = { 0 };
+uint32_t         n_cores;
+
+#ifdef ENABLE_FAILED_COUNTS
 atomic_stats_s atomic_stats;
 
-lock_t                 LOCK_INITIALIZER( failed_counts_mutex );
+lock_t                 SM_LOCK_INITIALIZER( failed_counts_mutex );
 int                    failed_counts_n = 0;
 struct failed_counts_s failed_counts[max_failed_counts];
 
@@ -111,7 +122,7 @@ compare_failed_counts( const void* a_v, const void* b_v )
 
 #if 0
 static void print_atomic_stats() {
-#if defined( DO_FAILED_COUNTS ) && defined( TESTING )
+#if defined( ENABLE_FAILED_COUNTS ) && defined( TESTING )
   fprintf(stderr, "Critical sections: %ld, locked %ld\n", atomic_stats.atomic_count, atomic_stats.locked_count);
   qsort(failed_counts, failed_counts_n, sizeof(failed_counts[0]), compare_failed_counts);
   for (int i = 0; i < failed_counts_n; i++) {
@@ -138,7 +149,7 @@ check_log()
 }
 #endif
 
-bool do_predo        = true;
+bool do_predo        = false;
 bool use_threadcache = true;
 
 static void ( *free_p )( void* );
@@ -171,7 +182,9 @@ __SetLockPagesPrivilege()
 #ifndef TESTING
 static
 #else
+#ifdef __cplusplus
 extern "C"
+#endif
 #endif
     void
     initialize_malloc()
@@ -197,7 +210,7 @@ extern "C"
     }
     const size_t alloc_size = n_elts * sizeof( chunk_info );
 #if defined( __linux__ )
-    const size_t n_chunks = ceil( alloc_size, chunksize );
+    const size_t n_chunks = ceil64( alloc_size, chunksize );
     chunk_infos           = (chunk_info*) mmap_chunk_aligned_block( n_chunks );
 #elif defined( _WIN64 )
     // to avoid committing 512Mb into memory we will reserve continous virtual space
@@ -237,15 +250,22 @@ extern "C"
 #elif defined( _WIN64 )
     // do nothing
 #endif
+#ifdef ENABLE_FAILED_COUNTS
+    initialize_lock_array( &failed_counts_mutex, 1 );
+#endif
+    init_huge_malloc();
+    init_large_malloc();
+    init_small_malloc();
+    init_cached_malloc();
 }
 
 void
 maybe_initialize_malloc( void )
 {
-    if( atomic_load( &chunk_infos ) ) return;
-    while( __sync_lock_test_and_set( &initialize_lock, 1 ) ) { _mm_pause(); }
+    if( atomic_load( (volatile atomic_ptr*) &chunk_infos ) ) return;
+    while( atomic_test_and_set( &initialize_lock ) ) { _mm_pause(); }
     if( !chunk_infos ) initialize_malloc();
-    __sync_lock_release( &initialize_lock );
+    atomic_clear( &initialize_lock );
 }
 
 #ifdef TESTING
@@ -292,8 +312,11 @@ static uint64_t max_allocatable_size = ( chunksize << 27 ) - 1;
 //   BIG, used for large allocations.  These are 2MB-aligned chunks.  We use BIG for anything bigger than a quarter of a chunk.
 //   SMALL fit within a chunk.  Everything within a single chunk is the same size.
 // The sizes are the powers of two (1<<X) as well as (1<<X)*1.25 and (1<<X)*1.5 and (1<<X)*1.75
-extern "C" void*
-MALLOC( size_t size ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    void*
+    MALLOC( size_t size )
 {
     maybe_initialize_malloc();
     if( size >= max_allocatable_size )
@@ -324,19 +347,22 @@ MALLOC( size_t size ) __THROW
             binnumber_t bin    = size_2_bin( allocate_size );
             void*       result = cached_malloc( bin );
             if( result == NULL ) return NULL;
-            return reinterpret_cast<char*>( result ) + misalignment;
+            return (char*) result + misalignment;
         }
         else
         {
             void* result = huge_malloc( allocate_size );
             if( result == NULL ) return result;
-            return reinterpret_cast<char*>( result ) + misalignment;
+            return (char*) result + misalignment;
         }
     }
 }
 
-extern "C" void
-FREE( void* p ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    void
+    FREE( void* p )
 {
     maybe_initialize_malloc();
     if( p == NULL ) return;
@@ -349,14 +375,18 @@ FREE( void* p ) __THROW
         // free.
         if( free_p )
         {
+#ifdef TESTING
             fprintf( stderr, "calling underlying free(%p)\n", p );
+#endif
             free_p( p );
             return;
         }
         else
         {
+#ifdef TESTING
             fprintf( stderr, "Bad address passed to free()\n" );
             fflush( stderr );
+#endif
             abort();
         }
     }
@@ -374,8 +404,11 @@ FREE( void* p ) __THROW
     }
 }
 
-extern "C" void*
-REALLOC( void* p, size_t size ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    void*
+    REALLOC( void* p, size_t size )
 
 {
     if( size >= max_allocatable_size )
@@ -422,8 +455,11 @@ test_realloc( void )
 }
 #endif
 
-extern "C" void*
-CALLOC( size_t number, size_t size ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    void*
+    CALLOC( size_t number, size_t size )
 
 {
     void* result = MALLOC( number * size );
@@ -454,11 +490,11 @@ CALLOC( size_t number, size_t size ) __THROW
 static void*
 align_pointer_up( void* p, uint64_t alignment, uint64_t size, uint64_t alloced_size )
 {
-    uint64_t ru = reinterpret_cast<uint64_t>( p );
+    uint64_t ru = (uint64_t) p;
     uint64_t ra = ( ru + alignment - 1 ) & ~( alignment - 1 );
     SM_ASSERT( ( ra & ( alignment - 1 ) ) == 0 );
     SM_ASSERT( ra + size <= ru + alloced_size );
-    return reinterpret_cast<void*>( ra );
+    return (void*) ra;
 }
 
 static void*
@@ -494,16 +530,19 @@ aligned_malloc_internal( size_t alignment, size_t size )
     {
         // huge blocks are naturally powers of two, but they aren't always aligned.  Allocate something big enough to align it.
         // huge_malloc sets all the intermediate spots to bin -1 to indicate that it's not really the beginning.
-        void* r = huge_malloc( std::max(
-            alignment, size ) );    // this will be aligned.  The bookkeeping will be messed up if alignment>size, however.
+        void* r = huge_malloc(
+            max( alignment, size ) );    // this will be aligned.  The bookkeeping will be messed up if alignment>size, however.
         if( r == NULL ) return NULL;
-        SM_ASSERT( ( reinterpret_cast<uint64_t>( r ) & ( alignment - 1 ) ) == 0 );    // make sure it is aligned
+        SM_ASSERT( ( (uint64_t) r & ( alignment - 1 ) ) == 0 );    // make sure it is aligned
         return r;
     }
 }
 
-extern "C" void*
-ALIGNED_ALLOC( size_t alignment, size_t size ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    void*
+    ALIGNED_ALLOC( size_t alignment, size_t size )
 {
     if( size >= max_allocatable_size )
     {
@@ -525,8 +564,11 @@ ALIGNED_ALLOC( size_t alignment, size_t size ) __THROW
     return aligned_malloc_internal( alignment, size );
 }
 
-extern "C" int
-POSIX_MEMALIGN( void** ptr, size_t alignment, size_t size ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    int
+    POSIX_MEMALIGN( void** ptr, size_t alignment, size_t size )
 
 {
     if( alignment & ( alignment - 1 ) )
@@ -559,8 +601,11 @@ POSIX_MEMALIGN( void** ptr, size_t alignment, size_t size ) __THROW
     }
 }
 
-extern "C" void*
-MEMALIGN( size_t alignment, size_t size ) __THROW
+#ifdef __cplusplus
+extern "C"
+#endif
+    void*
+    MEMALIGN( size_t alignment, size_t size )
 {
     if( alignment & ( alignment - 1 ) )
     {
@@ -573,19 +618,22 @@ MEMALIGN( size_t alignment, size_t size ) __THROW
     return aligned_malloc_internal( alignment, size );
 }
 
-extern "C" size_t
-MALLOC_USABLE_SIZE( const void* ptr )
+#ifdef __cplusplus
+extern "C"
+#endif
+    size_t
+    MALLOC_USABLE_SIZE( const void* ptr )
 {
     chunknumber_t  cn      = address_2_chunknumber( ptr );
     bin_and_size_t b_and_s = chunk_infos[cn].bin_and_size;
     SM_ASSERT( b_and_s != 0 );
     binnumber_t bin  = bin_from_bin_and_size( b_and_s );
-    const char* base = reinterpret_cast<const char*>( object_base( const_cast<void*>( ptr ) ) );
+    const char* base = (const char*) object_base( (void*) ptr );
     SM_ASSERT( address_2_chunknumber( base ) == cn );
-    const char* ptr_c     = reinterpret_cast<const char*>( ptr );
+    const char* ptr_c     = (const char*) ptr;
     size_t      base_size = bin_2_size( bin );
-    SM_ASSERT( base <= ptr );
-    SM_ASSERT( static_cast<ptrdiff_t>( base_size ) >= ptrdiff_t( ptr_c - base ) );
+    SM_ASSERT( base <= (const char*) ptr );
+    SM_ASSERT( base_size >= ptr_c - base );
     return base_size - ( ptr_c - base );
 }
 
@@ -593,9 +641,9 @@ MALLOC_USABLE_SIZE( const void* ptr )
 static void
 test_malloc_usable_size_internal( size_t given_s )
 {
-    char*       a    = reinterpret_cast<char*>( MALLOC( given_s ) );
+    char*       a    = (char*) MALLOC( given_s );
     size_t      as   = MALLOC_USABLE_SIZE( a );
-    char*       base = reinterpret_cast<char*>( object_base( a ) );
+    char*       base = (char*) object_base( a );
     binnumber_t b    = size_2_bin( MALLOC_USABLE_SIZE( base ) );
     SM_ASSERT( MALLOC_USABLE_SIZE( base ) == bin_2_size( b ) );
     SM_ASSERT( MALLOC_USABLE_SIZE( base ) + base == MALLOC_USABLE_SIZE( a ) + a );
@@ -631,12 +679,12 @@ object_base( void* ptr )
         uint64_t wasted_offset = static_bin_info[bin].overhead_pages_per_chunk * pagesize;
         SM_ASSERT( offset_in_chunk( ptr ) >= wasted_offset );
         uint64_t useful_offset   = offset_in_chunk( ptr ) - wasted_offset;
-        uint32_t folio_number    = divide_offset_by_foliosize( static_cast<uint32_t>( useful_offset ), bin );
+        uint32_t folio_number    = divide_offset_by_foliosize( (uint32_t) useful_offset, bin );
         uint64_t folio_mul       = folio_number * static_bin_info[bin].folio_size;
-        uint32_t offset_in_folio = static_cast<uint32_t>( useful_offset - folio_mul );
+        uint32_t offset_in_folio = (uint32_t) ( useful_offset - folio_mul );
         uint64_t object_number   = divide_offset_by_objsize( offset_in_folio, bin );
-        return reinterpret_cast<void*>( cn * chunksize + wasted_offset + folio_mul
-                                        + object_number * static_bin_info[bin].object_size );
+        return (void*) ( (uint64_t) cn * chunksize + wasted_offset + folio_mul
+                         + object_number * static_bin_info[bin].object_size );
     }
 }
 
@@ -764,10 +812,10 @@ bin_and_size_t
 bin_and_size_to_bin_and_size( binnumber_t bin, size_t size )
 {
     SM_ASSERT( bin < 127 );
-    uint32_t n_pages = static_cast<uint32_t>( ceil( size, pagesize ) );
+    uint32_t n_pages = (uint32_t) ceil64( size, pagesize );
     if( n_pages < ( 1 << 24 ) ) { return 1 + bin + ( 1 << 7 ) + ( n_pages << 8 ); }
     else
     {
-        return static_cast<bin_and_size_t>( 1 + bin + ( ceil( size, chunksize ) << 8 ) );
+        return 1 + bin + (uint32_t) ( ceil64( size, chunksize ) << 8 );
     }
 }

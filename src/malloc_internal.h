@@ -1,20 +1,23 @@
-#ifndef MALLOC_CONSTANTS_H
-#define MALLOC_CONSTANTS_H
+#pragma once
+
+#include <stdarg.h>
+#include <stdint.h>
+//#include <sys/types.h>
 
 #ifdef TESTING
-#include <stdio.h>
 #include <inttypes.h>
+#include <stdio.h>
 #include <time.h>
 #endif
-#include "bassert.h"
+#include "sm_config.h"
 
-#include <stdint.h>
-#include <sys/types.h>
-
-#include "config.h"
+#include "sm_assert.h"
+#include "sm_atomic.h"
+#include "sm_bitops.h"
 
 #ifdef TESTING
-#define SM_LOG_DEBUG( format, ... ) if (0) log_debug( stdout, format, ##__VA_ARGS__ )
+#define SM_LOG_DEBUG( format, ... )                                                                                              \
+    if( 0 ) log_debug( stdout, format, ##__VA_ARGS__ )
 #define SM_LOG_FATAL( format, ... ) log_debug( stderr, format, ##__VA_ARGS__ )
 
 inline void
@@ -31,11 +34,14 @@ log_debug( FILE* f, const char* format, ... )
 #define SM_LOG_FATAL( format, ... )
 #endif
 
-const uint64_t pagesize            = 4096;
-const uint64_t log_chunksize       = 21;
-const uint64_t chunksize           = 1ull << log_chunksize;
-const uint64_t cacheline_size      = 64;
-const uint64_t cachelines_per_page = pagesize / cacheline_size;
+enum
+{
+    pagesize            = 4096,
+    log_chunksize       = 21,
+    chunksize           = 1ull << log_chunksize,
+    cacheline_size      = 64,
+    cachelines_per_page = pagesize / cacheline_size
+};
 
 // We exploit the fact that these are the same size in chunk_infos, which is a union of these two types.
 typedef uint32_t chunknumber_t;
@@ -54,8 +60,8 @@ bin_from_bin_and_size( bin_and_size_t bnt )
     return ( bnt & 127 ) - 1;
 }
 
-static inline constexpr uint64_t
-ceil( uint64_t a, uint64_t b )
+static inline uint64_t
+ceil64( uint64_t a, uint64_t b )
 {
     return ( a + b - 1 ) / b;
 }
@@ -94,22 +100,22 @@ address_2_chunknumber( const void* a )
     // TODO: static assert on pointer size
 
     // Given an address anywhere in a chunk, convert it to a chunk number from 0 to 1<<27
-    uint64_t au     = reinterpret_cast<uint64_t>( a );
+    uint64_t au     = (uint64_t) a;
     uint64_t am     = au / chunksize;
     uint64_t result = am % ( 1ull << 27 );
-    return static_cast<chunknumber_t>( result );
+    return (chunknumber_t) result;
 }
 
 static inline void*
 address_2_chunkaddress( const void* a )
 {
-    return reinterpret_cast<void*>( reinterpret_cast<uint64_t>( a ) & ~( chunksize - 1 ) );
+    return (void*) ( (uint64_t) a & ~( chunksize - 1 ) );
 }
 
 static inline uint64_t
 offset_in_chunk( const void* a )
 {
-    return reinterpret_cast<uint64_t>( a ) % chunksize;
+    return (uint64_t) a % chunksize;
 }
 
 static inline uint64_t
@@ -121,7 +127,7 @@ pagenum_in_chunk( const void* a )
 static inline uint64_t
 offset_in_page( const void* a )
 {
-    return reinterpret_cast<uint64_t>( a ) % pagesize;
+    return (uint64_t) a % pagesize;
 }
 
 static inline bool
@@ -140,21 +146,25 @@ void* object_base( void* ptr );
 // We take the chunk's beginning address P, shift it as P>>21 in a sign-extended fashion.  Then add 2^26 and we have a table.
 // Most of this table won't end up mapped.
 
-extern struct chunk_info
+typedef struct chunk_info
 {
     union
     {
         bin_and_size_t bin_and_size;
         chunknumber_t  next;    // Forms a linked list.
     };
-} * chunk_infos;    // I want this to be an array of length [1u<<27], but that causes link-time errors.  Instead initialize_malloc() mmaps something big enough.
+} chunk_info;    // I want this to be an array of length [1u<<27], but that causes link-time errors.  Instead initialize_malloc() mmaps something big enough.
 
 // Functions that are separated into various files.
+void  init_huge_malloc();
 void* huge_malloc( uint64_t size );
 void  huge_free( void* ptr );
 
-const unsigned int  log_max_chunknumber = 27;
-const chunknumber_t null_chunknumber    = 0;
+enum
+{
+    log_max_chunknumber = 27,
+    null_chunknumber    = 0
+};
 
 // We allocate chunks using only powers of two.  We don't bother with
 // a buddy system to coalesce chunks, instead we just purge chunks
@@ -168,60 +178,72 @@ extern chunknumber_t free_chunks[log_max_chunknumber];
 void* mmap_chunk_aligned_block( size_t n_chunks );
 
 #if defined( __linux__ )
-static inline void commit_ci_page_as_needed( chunknumber_t /*chunknum*/ )
+static inline void
+commit_ci_page_as_needed( chunknumber_t chunknum )
 {
+    (void) chunknum;
 }
 #elif defined( _WIN64 )
 void* mmap_allocate_space( size_t size );
 void  mmap_commit_page( void* ptr, size_t size );
 
-extern uint32_t    ci_bitfields[];
-extern chunk_info* chunk_infos;
+extern _Atomic uint32_t ci_bitfields[];
+extern chunk_info*      chunk_infos;
 
 static inline int
 check_ci_bit( uint32_t k )
 {
-    uint32_t bits = atomic_load( &ci_bitfields[k / 32] );
+    uint32_t bits = atomic_load( (volatile atomic_uint32*) &ci_bitfields[k / 32] );
     return ( ( bits & ( 1 << ( k % 32 ) ) ) != 0 );
 }
 
 static inline void
 set_ci_bit( uint32_t k )
 {
-    __sync_fetch_and_or( (int32_t*) &ci_bitfields[k / 32], long( 1 << ( k % 32 ) ) );
+    atomic_fetch_or( (volatile atomic_uint32*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
 }
 
 static inline void
 commit_ci_page_as_needed( chunknumber_t chunknum )
 {
-    constexpr size_t ci_pagesize = ( 4 * 1024 );
-    static_assert( ci_pagesize % sizeof( chunk_info ) == 0, "" );
-    constexpr size_t n_ci_elts = ci_pagesize / sizeof( chunk_info );
+    _Static_assert( pagesize % sizeof( chunk_info ) == 0, "" );
+
+    const uint32_t n_ci_elts = pagesize / sizeof( chunk_info );
 
     uint32_t bit = chunknum / n_ci_elts;
     if( !check_ci_bit( bit ) )
     {
         void* ptr = (char*) chunk_infos + bit * n_ci_elts * sizeof( chunk_info );
-        mmap_commit_page( ptr, ci_pagesize );
+        mmap_commit_page( ptr, pagesize );
         set_ci_bit( bit );
     }
 }
 #endif
 
+void  init_large_malloc();
 void* large_malloc( size_t size );
 void  large_free( void* ptr );
 
 void    add_to_footprint( int64_t delta );
 int64_t get_footprint();
 
+void  init_small_malloc();
 void* small_malloc( binnumber_t bin );
 void  small_free( void* ptr );
 
 extern bool use_threadcache;
+void        init_cached_malloc();
 void*       cached_malloc( binnumber_t bin );
 void        cached_free( void* ptr, binnumber_t bin );
 
-const int cpulimit = 128;
+enum
+{
+    cpulimit                      = 128,
+    global_cache_depth            = 8,
+    per_cpu_cache_bytecount_limit = 1024 * 1024,
+    thread_cache_bytecount_limit  = 2 * 4096
+
+};
 
 #ifdef ENABLE_STATS
 void print_cache_stats();
@@ -241,12 +263,16 @@ print_bin_stats()
 {
 }
 
-static inline void bin_stats_note_malloc( binnumber_t /*b*/ )
+static inline void
+bin_stats_note_malloc( binnumber_t b )
 {
+    (void) b;
 }
 
-static inline void bin_stats_note_free( binnumber_t /*b*/ )
+static inline void
+bin_stats_note_free( binnumber_t b )
 {
+    (void) b;
 }
 
 #endif
@@ -261,35 +287,35 @@ static inline void bin_stats_note_free( binnumber_t /*b*/ )
 void check_log_large();
 #endif
 
-struct large_object_list_cell
+typedef struct large_object_list_cell
 {
     union
     {
-        large_object_list_cell* next;
-        uint32_t                footprint;
+        struct large_object_list_cell* next;
+        uint32_t                       footprint;
     };
-};
+} large_object_list_cell;
 
-const uint32_t max_objects_per_folio =
-    2048; /* at most 2048 objects per folio. objsizes will check this when generated the constants. */
-const uint32_t folio_bitmap_n_words = max_objects_per_folio / 64;
-
-struct ALIGNED( 64 ) per_folio
+enum
 {
-    struct per_folio* next;
-    per_folio*        prev;
-    uint64_t          inuse_bitmap
-        [folio_bitmap_n_words];    // up to 512 objects (8 bytes per object) per page.  The bit is set if the object is in use.
+    max_objects_per_folio = 2048,
+    folio_bitmap_n_words  = max_objects_per_folio / 64
 };
+
+typedef struct per_folio
+{
+    SM_ALIGNED( 64 ) struct per_folio* next;
+    struct per_folio* prev;
+    _Atomic uint64_t  inuse_bitmap
+        [folio_bitmap_n_words];    // up to 512 objects (8 bytes per object) per page.  The bit is set if the object is in use.
+} per_folio;
 
 #ifdef TESTING
 #include "unit-tests.h"
-#endif
 
 static inline double
 tdiff( struct timespec* start, struct timespec* end )
 {
     return end->tv_sec - start->tv_sec + 1e-9 * ( end->tv_nsec - start->tv_nsec );
 }
-
 #endif

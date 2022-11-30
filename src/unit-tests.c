@@ -21,8 +21,10 @@ run_tests()
 }
 
 int
-main( int, char** )
+main( int argc, char** argv )
 {
+    (void) argc;
+    (void) argv;
     run_tests();
     return 0;
 }

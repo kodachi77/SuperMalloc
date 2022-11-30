@@ -7,9 +7,9 @@
 #endif
 
 #include "atomically.h"
-#include "bassert.h"
 #include "generated_constants.hxx"
 #include "malloc_internal.h"
+#include "sm_assert.h"
 
 #ifdef ENABLE_LOG_CHECKING
 static void log_command( char command, const void* ptr );
@@ -17,14 +17,18 @@ static void log_command( char command, const void* ptr );
 #define log_command( a, b ) ( (void) 0 )
 #endif
 
-static const binnumber_t       n_large_classes = first_huge_bin_number - first_large_bin_number;
+enum
+{
+    n_large_classes = first_huge_bin_number - first_large_bin_number
+};
+
 static large_object_list_cell* free_large_objects
     [n_large_classes];    // For each large size, a list (threaded through the chunk headers) of all the free objects of that size.
 // Later we'll be a little careful about purging those large objects (and we'll need to remember which are which, but we may also want thread-specific parts).  For now, just purge them all.
 
-static lock_t large_lock = LOCK_INITIALIZER;
+static lock_t large_lock = SM_LOCK_INITIALIZER;
 
-void
+large_object_list_cell*
 predo_large_malloc_pop( large_object_list_cell** free_head )
 {
     // For the predo, we basically want to look at the free head (and make it writeable) and
@@ -36,6 +40,7 @@ predo_large_malloc_pop( large_object_list_cell** free_head )
         prefetch_write( free_head );
         prefetch_read( h );
     }
+    return NULL;
 }
 
 large_object_list_cell*
@@ -51,6 +56,15 @@ do_large_malloc_pop( large_object_list_cell** free_head )
     }
 }
 
+SM_DECLARE_ATOMIC_OPERATION( large_malloc_pop, predo_large_malloc_pop, do_large_malloc_pop, large_object_list_cell*,
+                             large_object_list_cell** );
+
+void
+init_large_malloc()
+{
+    initialize_lock_array( &large_lock, 1 );
+}
+
 void*
 large_malloc( size_t size )
 // Effect: Allocate a large object (page allocated, multiple per chunk)
@@ -61,7 +75,7 @@ large_malloc( size_t size )
 //  for these pages we disable hugepages.)
 {
     SM_LOG_DEBUG( "large_malloc(%" PRIu64 "):\n", size );
-    uint32_t    footprint   = static_cast<uint32_t>( pagesize * ceil( size, pagesize ) );
+    uint32_t    footprint   = (uint32_t) ( pagesize * ceil64( size, pagesize ) );
     binnumber_t b           = size_2_bin( size );
     size_t      usable_size = bin_2_size( b );
     SM_ASSERT( b >= first_large_bin_number );
@@ -90,7 +104,7 @@ large_malloc( size_t size )
                 // The strategy for the atomic version is that we set e.result to NULL if the list
                 // becomes empty (so that we go around and do chunk allocation again).
 
-                h = atomically( &large_lock, "large_malloc_pop", predo_large_malloc_pop, do_large_malloc_pop, free_head );
+                h = SM_INVOKE_ATOMIC_OPERATION( &large_lock, large_malloc_pop, free_head );
                 if( h == NULL ) continue;    // Go try again
             }
             // that was the atomic part.
@@ -100,11 +114,10 @@ large_malloc( size_t size )
             SM_LOG_DEBUG( "returning the page corresponding to %p\n", h );
             void* chunk = address_2_chunkaddress( h );
             SM_LOG_DEBUG( "chunk=%p\n", chunk );
-            large_object_list_cell* chunk_as_list_cell = reinterpret_cast<large_object_list_cell*>( chunk );
+            large_object_list_cell* chunk_as_list_cell = chunk;
             size_t                  offset             = h - chunk_as_list_cell;
             SM_LOG_DEBUG( "offset=%" PRIu64 "\n", offset );
-            void* address = reinterpret_cast<void*>( reinterpret_cast<char*>( chunk ) + offset_of_first_object_in_large_chunk
-                                                     + offset * usable_size );
+            void* address = (char*) chunk + offset_of_first_object_in_large_chunk + offset * usable_size;
             SM_ASSERT( address_2_chunknumber( address ) == address_2_chunknumber( chunk ) );
             SM_LOG_DEBUG( "result=%p\n", address );
             SM_ASSERT( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( address )].bin_and_size ) == b );
@@ -148,9 +161,7 @@ large_malloc( size_t size )
                 {
                     large_object_list_cell* old_first = *free_head;
                     entry[objects_per_chunk - 1].next = old_first;
-                    if( __sync_bool_compare_and_swap( (volatile uint64_t*) free_head, (uint64_t) old_first,
-                                                      (uint64_t) &entry[0] ) )    // TODO: fix extra casts
-                        break;
+                    if( atomic_compare_and_swap( (volatile atomic_ptr*) free_head, old_first, &entry[0] ) ) break;
                 }
             }
 
@@ -172,7 +183,7 @@ large_footprint( void* p )
     uint64_t offset      = offset_in_chunk( p );
     uint64_t objnum      = ( offset - offset_of_first_object_in_large_chunk ) / usable_size;
     SM_LOG_DEBUG( "objnum %p is in bin %d, usable_size=%" PRIu64 ", objnum=%" PRIu64 "\n", p, bin, usable_size, objnum );
-    large_object_list_cell* entries = reinterpret_cast<large_object_list_cell*>( address_2_chunkaddress( p ) );
+    large_object_list_cell* entries = address_2_chunkaddress( p );
 
     SM_LOG_DEBUG( "entries are %p\n", entries );
     uint32_t footprint = entries[objnum].footprint;
@@ -193,15 +204,15 @@ large_free( void* p )
     madvise( p, usable_size, MADV_DONTNEED );
 
     uint64_t offset = offset_in_chunk( p );
-    uint64_t objnum = divide_offset_by_objsize( static_cast<uint32_t>( offset - offset_of_first_object_in_large_chunk ), bin );
+    uint64_t objnum = divide_offset_by_objsize( (uint32_t) ( offset - offset_of_first_object_in_large_chunk ), bin );
     if( IS_TESTING )
     {
         uint64_t objnum2 = ( offset - offset_of_first_object_in_large_chunk ) / usable_size;
         SM_ASSERT( objnum == objnum2 );
     }
-    large_object_list_cell* entries   = reinterpret_cast<large_object_list_cell*>( address_2_chunkaddress( p ) );
+    large_object_list_cell* entries   = (large_object_list_cell*) address_2_chunkaddress( p );
     uint32_t                footprint = entries[objnum].footprint;
-    add_to_footprint( -static_cast<int64_t>( footprint ) );
+    add_to_footprint( -(int32_t) footprint );
     large_object_list_cell** h  = &free_large_objects[bin - first_large_bin_number];
     large_object_list_cell*  ei = entries + objnum;
     // This part atomic. Can be done with compare_and_swap
@@ -214,10 +225,9 @@ large_free( void* p )
     {
         while( 1 )
         {
-            large_object_list_cell* first = atomic_load( h );
+            large_object_list_cell* first = atomic_load( (volatile atomic_ptr*) h );
             ei->next                      = first;
-            if( __sync_bool_compare_and_swap( (volatile uint64_t*) h, (uint64_t) first, (uint64_t) ei ) )
-                break;    // TODO: fix extra casts
+            if( atomic_compare_and_swap( (volatile atomic_ptr*) h, first, ei ) ) break;
         }
     }
 }
@@ -298,7 +308,7 @@ test_large_malloc( void )
 
         SM_ASSERT( large_footprint( x ) == s );
 
-        SM_ASSERT( get_footprint() - fp == static_cast<int64_t>( s ) );
+        SM_ASSERT( get_footprint() - fp == (int64_t) s );
 
         void* y = large_malloc( s );
         SM_ASSERT( y );
@@ -324,7 +334,7 @@ static struct logentry
 static void
 log_command( char command, const void* ptr )
 {
-    int i = __sync_fetch_and_add( &log_count, 1 );
+    int i = atomic_fetch_add( &log_count, 1 );
     if( i < log_count_limit )
     {
         log[i].command = command;

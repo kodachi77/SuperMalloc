@@ -1,5 +1,3 @@
-#include <algorithm>
-
 #ifdef ENABLE_STATS
 
 #include "atomically.h"
@@ -19,17 +17,17 @@ static struct stats
 void
 bin_stats_note_malloc( binnumber_t b )
 {
-    b = std::min( first_huge_bin_number, b );
-    __sync_fetch_and_add( &stats.b[b].n_mallocs, 1 );
-    uint64_t net = __sync_fetch_and_add( &stats.b[b].net_n_mallocs, 1 );
+    b = min( first_huge_bin_number, b );
+    atomic_fetch_add( &stats.b[b].n_mallocs, 1 );
+    uint64_t net = atomic_fetch_add( &stats.b[b].net_n_mallocs, 1 );
     fetch_and_max( &stats.b[b].highwater_mark, net );
 }
 
 void
 bin_stats_note_free( binnumber_t b )
 {
-    b = std::min( first_huge_bin_number, b );
-    __sync_fetch_and_add( &stats.b[b].net_n_mallocs, -1 );
+    b = min( first_huge_bin_number, b );
+    atomic_fetch_add( &stats.b[b].net_n_mallocs, -1 );
 }
 
 void

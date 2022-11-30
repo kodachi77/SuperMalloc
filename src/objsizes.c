@@ -1,62 +1,11 @@
 #include <assert.h>
+#include <inttypes.h>    // for PRIu64
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include <inttypes.h> /* for PRIu64 */
-
-/*
-* The following section is duplicated from malloc_internal.h
-* 
-* TODO: remove once whole project has been converted to C.
-*/
-enum
-{
-    pagesize              = 4096,
-    log_chunksize         = 21,
-    chunksize             = 1ull << log_chunksize,
-    cacheline_size        = 64,
-    cachelines_per_page   = pagesize / cacheline_size,
-    max_objects_per_folio = 2048,
-    folio_bitmap_n_words  = max_objects_per_folio / 64
-};
-
-typedef uint32_t binnumber_t;
-
-static inline uint32_t
-ceil32( uint32_t a, uint32_t b )
-{
-    return ( a + b - 1 ) / b;
-}
-
-typedef __declspec( align( 64 ) ) struct per_folio
-{
-    struct per_folio* next;
-    struct per_folio* prev;
-    uint64_t          inuse_bitmap[folio_bitmap_n_words];
-} per_folio;
-
-#pragma intrinsic( _BitScanForward64 )
-
-static inline uint32_t
-__builtin_ctzl( uint64_t value )
-{
-    unsigned long index = 0;
-    return (uint32_t) ( _BitScanForward64( &index, value ) ? index : 64 );
-}
-
-static inline int
-lg_of_power_of_two( uint64_t a )
-{
-    return __builtin_ctzl( a );
-}
-
-static inline bool
-is_power_of_two( uint64_t x )
-{
-    return ( x & ( x - 1 ) ) == 0;
-}
-/****************************************/
+#include "malloc_internal.h"
 
 static bool
 is_prime_or_9_or_15( uint32_t x )
@@ -165,14 +114,15 @@ calculate_foliosize( uint64_t objsize )
 static void
 print_number( FILE* f, uint64_t n, int len )
 {
-    if( n <= 1024 || ( n % 1024 ) )
+    fprintf( f, "%*" PRIu64, len, n );
+    /*if( n <= 1024 || ( n % 1024 ) )
         fprintf( f, "%*" PRIu64, len, n );
     else if( n < 1024 * 1024 || ( n % ( 1024 * 1024 ) ) )
         fprintf( f, "%*" PRIu64 "*Ki", max( 1, len - 3 ), n / 1024 );
     else if( is_power_of_two( n ) )
         fprintf( f, "1" PRIu64 " << %*d", max( 1, len - 5 ), lg_of_power_of_two( n ) );
     else
-        fprintf( f, "%*" PRIu64 "*Me", max( 1, len - 3 ), n / ( 1024 * 1024 ) );
+        fprintf( f, "%*" PRIu64 "*Me", max( 1, len - 3 ), n / ( 1024 * 1024 ) );*/
 }
 
 enum bin_category
@@ -263,14 +213,14 @@ main( int argc, const char* argv[] )
     printf( "//  from %s\n\n", __FILE__ );
     fprintf( cf, "#include \"malloc_internal.h\"\n" );
     printf( "#include \"malloc_internal.h\"\n" );
-    printf( "#include \"config.h\"\n" );
+    printf( "#include \"sm_config.h\"\n" );
     printf( "#include <stdlib.h>\n" );
     printf( "#include <stdint.h>\n" );
     printf( "#include <sys/types.h>\n" );
     printf( "// For chunks containing small objects, we reserve the first\n" );
     printf( "// several pages for bitmaps and linked lists.\n" );
-    printf( "//   There's a per_page struct containing 2 pointers and a\n" );
-    printf( "//   bitmap, and there are 512 of those.\n" );
+    printf( "// There's a per_page struct containing 2 pointers and a\n" );
+    printf( "// bitmap, and there are 512 of those.\n" );
     printf( "// As a result, there is no overhead in each page, but there is\n" );
     printf( "// overhead per chunk, which affects the large object sizes.\n\n" );
     printf( "// We obtain hugepages from the operating system via mmap(2).\n" );
@@ -283,30 +233,28 @@ main( int argc, const char* argv[] )
     printf( "//  Larger bin numbers B indicate the object size, coded as\n" );
     printf( "//     malloc_usable_size(object) = page_size*(bin_of(object)-first_huge_bin_number;\n" );
 
-    printf( "static const size_t Ki = 1024;  /* Kibi */\n" );
-    printf( "static const size_t Me = Ki*Ki; /* Mebi */\n" );
-
     static_bins = (static_bin_t*) malloc( static_bin_cnt * sizeof( static_bin_t ) );
     assert( static_bins );
 
-    const char* struct_definition =
-        "struct static_bin_s { uint64_t object_size, folio_size; objects_per_folio_t objects_per_folio; folios_per_chunk_t "
+    const char* const struct_definition =
+        "typedef struct static_bin_s { uint64_t object_size, folio_size; objects_per_folio_t objects_per_folio; "
+        "folios_per_chunk_t "
         "folios_per_chunk;  uint8_t overhead_pages_per_chunk, object_division_shift_magic, folio_division_shift_magic; uint64_t "
-        "object_division_multiply_magic, folio_division_multiply_magic;}";
-    printf( "extern const %s static_bin_info[];\n", struct_definition );
-    fprintf( cf, "ALIGNED( 64 ) const struct static_bin_s static_bin_info[] = {\n" );
+        "object_division_multiply_magic, folio_division_multiply_magic;} static_bin_s";
+    printf( "%s;\nextern static_bin_s static_bin_info[];\n", struct_definition );
+    fprintf( cf, "SM_ALIGNED( 64 ) static_bin_s static_bin_info[] = { \n" );
     fprintf( cf, "// The first class of small objects try to get a maximum of 25%% internal fragmentation by having sizes of the "
                  "form c<<k where c is 4, 5, 6 or 7.\n" );
     fprintf( cf, "// We stop at when we have 4 cachelines, so that the ones that happen to be multiples of cache lines are "
                  "either a power of two or odd.\n" );
-    const char* header_line =
+    const char* const header_line =
         "//{ objsize, folio_size, objects_per_folio, folios_per_chunk, overhead_pages_per_chunk, magic: object_shift, "
         "folio_shift, object_multiply, folio_multiply},  // fragmentation(overhead bins net)\n";
     fprintf( cf, "%s", header_line );
 
     int bin = 0;
 
-    uint64_t prev_non_aligned_size = 8; /* a size that could be returned by a non-aligned malloc */
+    uint64_t prev_non_aligned_size = 8;    // a size that could be returned by a non-aligned malloc
     for( uint64_t k = 8; 1; k *= 2 )
     {
         for( uint64_t c = 4; c <= 7; c++ )
@@ -362,13 +310,13 @@ done_small:
          * must round up to the next chunk when allocating memory.
          */
         if( is_power_of_two( objsize_in_cachelines )
-            || prev_objsize_in_cachelines < .7 * next_prime_or_9_or_15( objsize_in_cachelines ) /* not next power of two */
+            || prev_objsize_in_cachelines < 0.7 * next_prime_or_9_or_15( objsize_in_cachelines )    // not next power of two
         )
         {
             uint32_t objsize = objsize_in_cachelines * cacheline_size;
             static_bin_init( &b, BIN_SMALL, objsize );
             largest_small = objsize;
-            /* Don't like this magic numbers (8*pagesize?  Really?) */
+            // TODO: Don't like this magic number ('8 * pagesize' really?)
             uint32_t folios_per_chunk       = ( chunksize - 8 * pagesize ) / b.foliosize;
             uint32_t minimum_used_per_folio = ( prev_objsize_in_cachelines * cacheline_size + 1 ) * b.objects_per_folio;
             double   fragmentation          = ( folios_per_chunk * minimum_used_per_folio ) / (double) chunksize;
@@ -385,19 +333,19 @@ done_small:
     const uint64_t offset_of_first_object_in_large_chunk = pagesize;
 
     fprintf( cf, "// large objects (page allocated):\n" );
-    fprintf( cf, "//  So that we can return an accurate malloc_usable_size(), we maintain (in the first page of each largepage "
+    fprintf( cf, "// So that we can return an accurate malloc_usable_size(), we maintain (in the first page of each largepage "
                  "chunk) information about each object (large_object_list_cell)\n" );
-    fprintf( cf, "//   For unallocated objects we maintain a next pointer to the next large_object_list_cell for an free object "
+    fprintf( cf, "// For unallocated objects we maintain a next pointer to the next large_object_list_cell for an free object "
                  "of the same size.\n" );
-    fprintf( cf, "//   For allocated objects, we maintain the footprint.\n" );
-    fprintf( cf, "//  This extra information always fits within one page.\n" );
+    fprintf( cf, "// For allocated objects, we maintain the footprint.\n" );
+    fprintf( cf, "// This extra information always fits within one page.\n" );
     uint32_t largest_waste_at_end = log_chunksize - 4;
     fprintf( cf,
-             "//  This introduces fragmentation.  This fragmentation doesn't matter much since it will be purged. For sizes up "
+             "// This introduces fragmentation.  This fragmentation doesn't matter much since it will be purged. For sizes up "
              "to 1<<%d we waste the last potential object.\n",
              largest_waste_at_end );
     fprintf( cf,
-             "//   for the larger stuff, we reduce the size of the object slightly which introduces some other fragmentation\n" );
+             "// for the larger stuff, we reduce the size of the object slightly which introduces some other fragmentation\n" );
     int first_large_bin = bin;
     for( uint64_t log_allocsize = 14; log_allocsize < log_chunksize; log_allocsize++ )
     {
@@ -426,16 +374,15 @@ done_small:
         fprintf( cf, "\n" );
     }
     fprintf( cf, "\n};\n" );
-    printf( "static const binnumber_t bin_number_limit = %u;\n", bin );
-    printf( "static const size_t largest_small         = %" PRIu64 ";\n", largest_small );
-    const size_t largest_large = ( 1 << ( log_chunksize - 1 ) ) - pagesize;
-    printf( "static const uint64_t offset_of_first_object_in_large_chunk = %" PRIu64 ";\n",
-            offset_of_first_object_in_large_chunk );
-    printf( "static const size_t largest_large         = %" PRIu64 ";\n", largest_large );
-    printf( "static const binnumber_t first_large_bin_number = %d;\n", first_large_bin );
-    printf( "static const binnumber_t first_huge_bin_number   = %u;\n", first_huge_bin );
 
-    printf( "#if defined (__linux__)\n" );
+    printf( "enum { bin_number_limit = %u,\n", bin );
+    printf( "    largest_small         = %" PRIu64 ",\n", largest_small );
+    const size_t largest_large = ( 1 << ( log_chunksize - 1 ) ) - pagesize;
+    printf( "    offset_of_first_object_in_large_chunk = %" PRIu64 ",\n", offset_of_first_object_in_large_chunk );
+    printf( "    largest_large         = %" PRIu64 ",\n", largest_large );
+    printf( "    first_large_bin_number = %d,\n", first_large_bin );
+    printf( "    first_huge_bin_number   = %u };\n", first_huge_bin );
+
     printf( "#define REPEAT_FOR_SMALL_BINS(x) " );
     for( int b = 0; b < first_large_bin; b++ )
     {
@@ -444,32 +391,29 @@ done_small:
     }
 
     printf( "\n" );
-    printf( "#elif defined (_WIN64)\n" );
-    printf( "#define REPEAT_FOR_SMALL_BINS(x)\n" );
-    printf( "#endif\n" );
 
     printf( "struct per_folio; // Forward decl needed here.\n" );
-    printf( "struct dynamic_small_bin_info {\n" );
+    printf( "typedef struct dynamic_small_bin_info {\n" );
     printf( "  union {\n" );
     printf( "    struct {\n" );
     /*
-    Need two extra list for each folio.  One for the empty folios which have not been uncommitted 
-    (e.g., with madvise(MADV_DONTNEED)), and one for the empty folios that have been uncomitted.
-    */
+     * Need two extra list for each folio.  One for the empty folios which have not been uncommitted 
+     * (e.g., with madvise(MADV_DONTNEED)), and one for the empty folios that have been uncomitted.
+     */
     int n_extra_lists_per_folio = 2;
     {
         int count = 0;
         for( int b = 0; b < first_large_bin; b++ )
         {
-            printf( "      per_folio *b%d[%d];\n", b, static_bins[b].objects_per_folio + n_extra_lists_per_folio );
+            printf( "      struct per_folio *b%d[%d];\n", b, static_bins[b].objects_per_folio + n_extra_lists_per_folio );
             assert( b < static_bin_cnt );
             count += static_bins[b].objects_per_folio + n_extra_lists_per_folio;
         }
         printf( "    };\n" );
-        printf( "    per_folio *b[%d];\n", count );
+        printf( "    struct per_folio *b[%d];\n", count );
     }
     printf( "  };\n" );
-    printf( "};\n" );
+    printf( "} dynamic_small_bin_info;\n" );
     printf( "// dynamic_small_bin_offset is declared const even though one implementation looks in an array. The array is a "
             "const\n" );
     printf( "static inline uint32_t dynamic_small_bin_offset(binnumber_t bin) {\n" );
@@ -514,12 +458,12 @@ done_small:
     printf( "}\n\n" );
 
     printf( "static inline uint32_t divide_offset_by_objsize(uint32_t offset, binnumber_t bin) {\n" );
-    printf( "  return static_cast<uint32_t>((offset * static_bin_info[bin].object_division_multiply_magic) >> "
-            "static_bin_info[bin].object_division_shift_magic);\n" );
+    printf( "  return (offset * static_bin_info[bin].object_division_multiply_magic) >> "
+            "static_bin_info[bin].object_division_shift_magic;\n" );
     printf( "}\n\n" );
     printf( "static inline uint32_t divide_offset_by_foliosize(uint32_t offset, binnumber_t bin) {\n" );
-    printf( "  return static_cast<uint32_t>((offset * static_bin_info[bin].folio_division_multiply_magic) >> "
-            "static_bin_info[bin].folio_division_shift_magic);\n" );
+    printf( "  return (offset * static_bin_info[bin].folio_division_multiply_magic) >> "
+            "static_bin_info[bin].folio_division_shift_magic;\n" );
     printf( "}\n\n" );
 
     printf( "#endif\n" );

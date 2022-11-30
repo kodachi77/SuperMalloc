@@ -27,22 +27,22 @@ end)
 
 newoption {
     trigger = "enable-log-check",
-    description = "Enable log checking"
+    description = "Enable log checking."
 }
 
 newoption {
     trigger = "enable-stats",
-    description = "Enable statistics"
+    description = "Enable statistics."
 }
 
 newoption {
-    trigger = "do-failed-counts",
-    description = "Enable counting failed aquisitions"
+    trigger = "enable-failed-counts",
+    description = "Enable counting failed shared resource acquisitions."
 }
 
 newoption {
     trigger = "coverage",
-    description = "Create code coverage report"
+    description = "Create code coverage report."
 }
 
 workspace "SuperMalloc"
@@ -57,13 +57,6 @@ filter { "configurations:Release" }
     defines { "NDEBUG" }
     optimize "On"
 
-filter {}
-    language "C++"
-    cppdialect "C++11"
-    systemversion "latest"
-    targetdir "bin/%{cfg.platform}"
-    objdir "__build/%{cfg.platform}/%{cfg.buildcfg}"
-
 filter { "system:windows" }
     platforms { "x64" }
 
@@ -77,49 +70,62 @@ filter { "system:linux" }
 filter { "action:vs*" }
     defines { "_CRT_SECURE_NO_DEPRECATE", "_CRT_SECURE_NO_WARNINGS", "_CRT_NONSTDC_NO_WARNINGS" }
 
+filter {}
+    characterset "Unicode"
+    systemversion "latest"
+    targetdir "bin/%{cfg.platform}"
+    objdir "__build/%{cfg.platform}/%{cfg.buildcfg}"
+
 group "SuperMalloc"
+
+project "objsizes"
+    kind "ConsoleApp"
+    language "C"
+    cdialect "C11"
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    files { "src/objsizes.c" }
+    postbuildcommands { "%{cfg.buildtarget.abspath} src/generated_constants.cxx > src/generated_constants.hxx" }
 
 project "supermalloc"
     kind "StaticLib"
-    dependson { "objsizes" }
-    files { "src/*.cc", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
-    excludes { "src/objsizes.c", "src/unit-tests.cc", "src/unit-tests.h" }
-
-project "objsizes"
     language "C"
     cdialect "C11"
-    -- usestandardpreprocessor "On"
-    kind "ConsoleApp"
-    files { "src/objsizes.c" }
-    postbuildcommands { "%{cfg.buildtarget.abspath} src/generated_constants.cxx > src/generated_constants.hxx" }
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    dependson { "objsizes" }
+    files { "src/*.c", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
+    excludes { "src/objsizes.c", "src/unit-tests.c", "src/unit-tests.h" }
 
 group "Tests"
 
 project "supermalloc_test"
     kind "ConsoleApp"
-    files { "src/*.cc", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
+    language "C"
+    cdialect "C11"
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    files { "src/*.c", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
     excludes { "src/objsizes.c" }
-    defines {"TESTING"}
+    defines { "TESTING" }
     if _OPTIONS["enable-log-check"] then
         defines { "ENABLE_LOG_CHECKING" }
     end
     if _OPTIONS["enable-stats"] then
         defines { "ENABLE_STATS" }
     end
-    if _OPTIONS["do-failed-counts"] then
-        defines { "DO_FAILED_COUNTS" }
+    if _OPTIONS["enable-failed-counts"] then
+        defines { "ENABLE_FAILED_COUNTS" }
     end
     if _OPTIONS["coverage"] then
         filter { "system:linux" }
             buildoptions { "-fprofile-arcs -ftest-coverage" }
             links { "gcov" }
             defines { "COVERAGE" }
-    end 
+    end
 
 group "Benchmarks"
 
 project "alloc-test"
     kind "ConsoleApp"
+    language "C++"
     cppdialect "C++17"
     files { "benchmarks/alloc-test/*.cpp", "benchmarks/alloc-test/*.h" }
     includedirs { "src" }
@@ -127,12 +133,18 @@ project "alloc-test"
 
 project "larson"
     kind "ConsoleApp"
-    files { "benchmarks/larson/larson.cpp" }
+    language "C"
+    cdialect "C11"
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    files { "benchmarks/larson/larson.c" }
     includedirs {"src" }
     links { "supermalloc" }
 
 project "xmalloc-test"
     kind "ConsoleApp"
+    language "C"
+    cdialect "C11"
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
     files { "benchmarks/xmalloc-test/*.c", "benchmarks/xmalloc-test/*.h" }
     includedirs {"src" }
     links { "supermalloc" }

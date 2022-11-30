@@ -6,9 +6,13 @@
 #endif
 
 #ifdef __WIN32__
+#include <stdbool.h>
 #include <conio.h>
 #include <process.h>
+#include <time.h>
 #include <windows.h>
+
+#define CLOCK_MONOTONIC 0
 
 static inline bool
 __sync_bool_compare_and_swap( unsigned long volatile* dst, unsigned long oldi, unsigned long newi )
@@ -16,13 +20,19 @@ __sync_bool_compare_and_swap( unsigned long volatile* dst, unsigned long oldi, u
     int original = InterlockedCompareExchange( (volatile long*) dst, (long) newi, (long) oldi );
     return ( original == oldi );
 }
+
+#define __sync_fetch_and_add( a, b )                                                                                             \
+    sizeof( *( a ) ) == sizeof( __int64 ) ? InterlockedExchangeAdd64( (volatile __int64*) ( a ), (__int64)( b ) ) :                \
+                                            InterlockedExchangeAdd( (volatile long*) ( a ), (long) ( b ) )
+
 #define __ATOMIC_CONSUME 0
 #pragma intrinsic( _InterlockedOr )
 
 static inline unsigned long
-__atomic_load_n( unsigned long* ptr, int /* memorder */ )
+__atomic_load_n( unsigned long* ptr, int memorder )
 {
-    return unsigned long( _InterlockedOr( (volatile long*) ptr, 0 ) );
+    (void) memorder;
+    return (unsigned long)_InterlockedOr( (volatile long*) ptr, 0 );
 }
 
 #else
@@ -240,10 +250,7 @@ extern int cFreeSpace;
 int cChecked = 0;
 
 #if defined( _WIN32 )
-extern "C"
-{
-    extern HANDLE crtheap;
-};
+extern HANDLE crtheap;
 #endif
 #if defined(__linux__)
 static long getmaxrss(void) {
@@ -261,8 +268,13 @@ getmaxrss( void )
 #endif
 const bool time_variance = true;
 unsigned long slowest = 0;
-unsigned long slow_count = 0;
-const int n_slow_instance = 100;
+unsigned long slow_count    = 0;
+
+enum
+{
+    n_slow_instance = 100
+};
+
 unsigned long slow_instance[n_slow_instance];
 static double get_variance(void);
 
@@ -401,7 +413,6 @@ static double get_variance(void) {
   return (Ex2 - s2)/global_vsum.n;
 }
 
-
 static char *my_malloc(size_t size, struct variance_sum *vs) {
   struct timespec start,end;
   if (time_variance) {
@@ -440,12 +451,12 @@ runloops( long sleep_cnt, int num_chunks )
     int    victim;
     size_t blk_size;
 #ifdef __WIN32__
-    _LARGE_INTEGER ticks_per_sec, start_cnt, end_cnt;
+    LARGE_INTEGER ticks_per_sec, start_cnt, end_cnt;
 #else
     long ticks_per_sec;
     long start_cnt, end_cnt;
 #endif
-    _int64 ticks;
+    __int64 ticks;
     double duration;
     double reqd_space;
     ULONG  used_space = 0;
@@ -529,16 +540,16 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
     thread_data* pdea;
     long         nperthread;
     long         sum_threads;
-    _int64       sum_allocs;
-    _int64       sum_frees;
+    __int64       sum_allocs;
+    __int64       sum_frees;
     double       duration;
 #ifdef __WIN32__
-    _LARGE_INTEGER ticks_per_sec, start_cnt, end_cnt;
+    LARGE_INTEGER ticks_per_sec, start_cnt, end_cnt;
 #else
     long ticks_per_sec;
     long start_cnt, end_cnt;
 #endif
-    _int64 ticks;
+    __int64 ticks;
     double rate_1 = 0, rate_n;
     double reqd_space;
     ULONG  used_space;
@@ -574,7 +585,7 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
             de_area[i].cFrees   = 0;
             de_area[i].cThreads = 0;
             de_area[i].finished = FALSE;
-            de_area[i].vsum     = { 0, 0, 0 };    //(struct variance_sum){0,0,0};
+            memset(&de_area[i].vsum, 0, sizeof(struct variance_sum));    //(struct variance_sum){0,0,0};
             lran2_init( &de_area[i].rgen, de_area[i].seed );
 
 #ifdef __WIN32__

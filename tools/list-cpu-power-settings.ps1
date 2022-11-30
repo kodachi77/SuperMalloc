@@ -38,15 +38,11 @@ $settings_in_subgroup | Where-Object GroupComponent -Match "{$SUB_PROCESSOR}" | 
         $value_desc = [string]::Format("# Values: {0}", ($tmp -join ", "))
     }
     
-    $prefix = ""
     $range_desc = ""
     if ($r -ne $null)
     {
         $valmin = $r | Where-Object ElementName -eq "ValueMin"
         $valmax = $r | Where-Object ElementName -eq "ValueMax"
-        
-        $prefix = $(if ($setting_value -lt $valmax.SettingValue -or $setting_value -gt $valmax.SettingValue) { "" }
-            else { "# " })
         
         $range_desc = [string]::Format("# Current Value={0}; Min Value={1}; Max Value={2} (in {3})", $setting_value, $(if ($valmin -ne $null) { $valmin.SettingValue }
                 else { "" }), $(if ($valmax -ne $null) { $valmax.SettingValue }
@@ -55,7 +51,7 @@ $settings_in_subgroup | Where-Object GroupComponent -Match "{$SUB_PROCESSOR}" | 
     
     
     $desc = [string]::Format("# {0}", $ps.ElementName)
-    $powercfg = [string]::Format("{0}powercfg -attributes {1} {2} -attrib_hide", $prefix, $SUB_PROCESSOR, $guid)
+    $powercfg = [string]::Format("powercfg -attributes {1} {2} -attrib_hide", $SUB_PROCESSOR, $guid)
     
     $script_output += $desc + "`n"
     if ($range_desc) { $script_output += $range_desc + "`n" }

@@ -4,12 +4,12 @@
 #include <sys/mman.h>
 #endif
 #ifdef _WIN64
-#include "config.h"
+#include "sm_os.h"
 #endif
 
-#include "bassert.h"
 #include "generated_constants.hxx"
 #include "malloc_internal.h"
+#include "sm_assert.h"
 
 #ifdef TESTING
 #include <string.h>
@@ -31,7 +31,7 @@ mmap_size( size_t size )
         perror( "Map failed" );
     }
     if( r == MAP_FAILED ) return NULL;
-    __sync_fetch_and_add( &total_mapped, size );
+    atomic_fetch_add( &total_mapped, size );
     return r;
 
     // This is the old code...
@@ -45,14 +45,14 @@ mmap_size( size_t size )
 #elif defined( _WIN64 )
     DWORD flag = 0;
     // FIXME: if( size > ::GetLargePageMinimum() ) flag |= MEM_LARGE_PAGES; /* this causes some issues in madvise */
-    void* r = ::VirtualAlloc( NULL, size, flag | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    void* r = VirtualAlloc( NULL, size, flag | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
     if( !r )
     {
-        SM_LOG_FATAL(" VirtualAlloc failed. Error = %d\n", GetLastError() );
+        SM_LOG_FATAL( " VirtualAlloc failed. Error = %d\n", GetLastError() );
         return NULL;
     }
 
-    __sync_fetch_and_add( &total_mapped, size );
+    atomic_fetch_add( (volatile atomic_uint64*) &total_mapped, size );
 
 #endif
     return r;
@@ -71,7 +71,7 @@ unmap( void* p, size_t size )
             abort();
         }
         SM_ASSERT( r == 0 );
-        __sync_fetch_and_add( &mismapped_so_unmapped, size );
+        atomic_fetch_add( &mismapped_so_unmapped, size );
     }
 #elif defined( _WIN64 )
     if( size > 0 )
@@ -90,7 +90,7 @@ unmap( void* p, size_t size )
             size -= minfo.RegionSize;
         }
 
-        __sync_fetch_and_add( &mismapped_so_unmapped, size );
+        atomic_fetch_add( (volatile atomic_uint64*) &mismapped_so_unmapped, size );
     }
 #endif
 }
@@ -101,14 +101,14 @@ mmap_allocate_space( size_t size )
 {
     DWORD flag = 0;
     // FIXME: if( size > ::GetLargePageMinimum() ) flag |= MEM_LARGE_PAGES; /* this causes some issues in madvise */
-    void* r = ::VirtualAlloc( NULL, size, flag | MEM_RESERVE, PAGE_READWRITE );
+    void* r = VirtualAlloc( NULL, size, flag | MEM_RESERVE, PAGE_READWRITE );
     if( !r )
     {
         SM_LOG_FATAL( " VirtualAlloc failed. Error = %d\n", GetLastError() );
         return NULL;
     }
 
-    //__sync_fetch_and_add( &total_mapped, size );
+    //atomic_fetch_add( &total_mapped, size );
 
     return r;
 }
@@ -117,9 +117,9 @@ void
 mmap_commit_page( void* ptr, size_t size )
 {
     // VirtualAlloc cannot reserve a reserved page. It can commit a page that is already committed.
-    void* r = ::VirtualAlloc( ptr, size, MEM_COMMIT, PAGE_READWRITE );
+    void* r = VirtualAlloc( ptr, size, MEM_COMMIT, PAGE_READWRITE );
     if( !r ) { SM_LOG_FATAL( " VirtualAlloc failed. Error = %d\n", GetLastError() ); }
-    //__sync_fetch_and_add( &total_mapped, size );
+    //atomic_fetch_add( &total_mapped, size );
 }
 
 #endif
@@ -134,15 +134,15 @@ chunk_create_slow( size_t n_chunks )
     size_t m_offset = offset_in_chunk( m );
     if( m_offset == 0 )
     {
-        unmap( reinterpret_cast<char*>( m ) + n_chunks * chunksize, chunksize );
+        unmap( (char*) m + n_chunks * chunksize, chunksize );
         return m;
     }
     else
     {
         size_t leading_useless = chunksize - m_offset;    // guaranteed to be non-negative
         unmap( m, leading_useless );
-        void* final_m = reinterpret_cast<char*>( m ) + leading_useless;
-        unmap( reinterpret_cast<char*>( final_m ) + n_chunks * chunksize, m_offset );
+        void* final_m = (char*) m + leading_useless;
+        unmap( (char*) final_m + n_chunks * chunksize, m_offset );
         return final_m;
     }
 }

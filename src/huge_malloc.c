@@ -2,18 +2,17 @@
 #include <sys/mman.h>
 #endif
 #include <stddef.h>
-#include <algorithm>
 
 #ifdef TESTING
 #include <stdio.h>
 #endif
 
 #include "atomically.h"
-#include "bassert.h"
 #include "generated_constants.hxx"
 #include "malloc_internal.h"
+#include "sm_assert.h"
 
-static lock_t huge_lock = LOCK_INITIALIZER;
+static lock_t huge_lock = SM_LOCK_INITIALIZER;
 
 // free_chunks[0] is a list of 1-chunk objects (which are, by definition chunk-aligned)
 // free_chunks[1] is a list of 2-chunk objects which are also 2-chunk aligned (that is 4MiB-aligned).
@@ -35,14 +34,16 @@ do_get_from_free_chunks( int f )
     chunknumber_t r = free_chunks[f];
     if( r == 0 ) return NULL;
     free_chunks[f] = chunk_infos[r].next;
-    return reinterpret_cast<void*>( static_cast<uint64_t>( r ) * chunksize );
+    return (void*) ( (uint64_t) r * chunksize );
 }
+
+SM_DECLARE_ATOMIC_OPERATION( __get_from_free_chunks, pre_get_from_free_chunks, do_get_from_free_chunks, void*, int );
 
 static void*
 get_cached_power_of_two_chunks( int list_number )
 {
-    if( atomic_load( &free_chunks[list_number] ) == 0 ) return NULL;    // there are none.
-    return atomically( &huge_lock, "huge:add_to_free_chunks", pre_get_from_free_chunks, do_get_from_free_chunks, list_number );
+    if( atomic_load( (volatile atomic_uint32*) &free_chunks[list_number] ) == 0 ) return NULL;
+    return SM_INVOKE_ATOMIC_OPERATION( &huge_lock, __get_from_free_chunks, list_number );
 }
 
 static void
@@ -58,10 +59,12 @@ put_cached_power_of_two_chunks( chunknumber_t cn, int list_number )
     {
         while( 1 )
         {
-            chunknumber_t hd = atomic_load( &free_chunks[list_number] );
+            chunknumber_t hd = atomic_load( (volatile atomic_uint32*) &free_chunks[list_number] );
             commit_ci_page_as_needed( cn );
             chunk_infos[cn].next = hd;
-            if( __sync_bool_compare_and_swap( &free_chunks[list_number], hd, cn ) ) break;
+            if( atomic_compare_and_swap( (volatile atomic_uint32*) &free_chunks[list_number], (atomic_uint32) hd,
+                                         (atomic_uint32) cn ) )
+                break;
         }
     }
 }
@@ -92,7 +95,7 @@ get_power_of_two_n_chunks( chunknumber_t n_chunks )
         if( ( c & ( n_chunks - 1 ) ) == 0 )
         {
             // c is aligned well enough
-            result = reinterpret_cast<void*>( c * chunksize );
+            result = (void*) ( (uint64_t) c * chunksize );
             c += n_chunks;
             break;
         }
@@ -117,13 +120,19 @@ get_power_of_two_n_chunks( chunknumber_t n_chunks )
     return result;
 }
 
+void
+init_huge_malloc()
+{
+    initialize_lock_array( &huge_lock, 1 );
+}
+
 void*
 huge_malloc( size_t size )
 {
     // allocates something out of the hyperceil(size) bin, which is also hyperceil(size)-aligned.
-    chunknumber_t n_chunks =
-        static_cast<uint32_t>( std::max<uint64_t>( 1ull, hyperceil( size ) / chunksize ) );    // at least one chunk always
-    void* c = get_power_of_two_n_chunks( n_chunks );
+    // at least one chunk always
+    chunknumber_t n_chunks = (chunknumber_t) max( 1ull, hyperceil( size ) / chunksize );
+    void*         c        = get_power_of_two_n_chunks( n_chunks );
     if( c == NULL ) return NULL;
 
     madvise( c, n_chunks * chunksize, MADV_DONTNEED );
@@ -166,15 +175,15 @@ huge_free( void* m )
 {
     // huge_free() is required to tolerate m being any pointer into the chunk returned by huge_malloc.
     // However this code cannot really tolerate i.
-    m = reinterpret_cast<void*>( reinterpret_cast<uint64_t>( m ) & ~4095 );
-    SM_ASSERT( ( reinterpret_cast<uint64_t>( m ) & ( chunksize - 1 ) ) == 0 );
+    m = (void*) ( (uint64_t) m & ~4095 );
+    SM_ASSERT( ( (uint64_t) m & ( chunksize - 1 ) ) == 0 );
     chunknumber_t cn = address_2_chunknumber( m );
     SM_ASSERT( cn );
     bin_and_size_t bnt = chunk_infos[cn].bin_and_size;
     SM_ASSERT( bnt != 0 );
     binnumber_t   bin   = bin_from_bin_and_size( bnt );
     uint64_t      siz   = bin_2_size( bin );
-    chunknumber_t csiz  = static_cast<uint32_t>( ceil( siz, chunksize ) );
+    chunknumber_t csiz  = (chunknumber_t) ceil64( siz, chunksize );
     uint64_t      hceil = hyperceil( csiz );
     uint32_t      hlog  = lg_of_power_of_two( hceil );
     SM_ASSERT( hlog < log_max_chunknumber );
@@ -197,7 +206,7 @@ test_huge_malloc( void )
     if( print ) printf( "temp=%p\n", temp );
 
     void* a = huge_malloc( largest_large + 1 );
-    SM_ASSERT( reinterpret_cast<uint64_t>( a ) % chunksize == 0 );
+    SM_ASSERT( (uint64_t) a % chunksize == 0 );
     chunknumber_t a_n = address_2_chunknumber( a );
     if( print ) printf( "a=%p a_n=0x%x\n", a, a_n );
     SM_ASSERT( bin_from_bin_and_size( chunk_infos[a_n].bin_and_size ) >= first_huge_bin_number );
@@ -206,40 +215,40 @@ test_huge_malloc( void )
     void* b = huge_malloc( largest_large + 2 );
     SM_ASSERT( offset_in_chunk( b ) == 0 );
     chunknumber_t b_n = address_2_chunknumber( b );
-    if( print ) printf( "b=%p diff=0x%tx a_n-b_n=%d\n", b, ptrdiff_t( (char*) a - (char*) b ), (int) a_n - (int) b_n );
+    if( print ) printf( "b=%p diff=0x%tx a_n-b_n=%d\n", b, (ptrdiff_t) ( (char*) a - (char*) b ), (int) a_n - (int) b_n );
     SM_ASSERT( bin_from_bin_and_size( chunk_infos[b_n].bin_and_size ) == first_huge_bin_number );
 
     void* c = huge_malloc( 2 * chunksize );
     SM_ASSERT( offset_in_chunk( c ) == 0 );
     chunknumber_t c_n = address_2_chunknumber( c );
     if( print )
-        printf( "c=%p diff=0x%tx bin = %u,%u b_n=%d c_n=%d\n", c, ptrdiff_t( (char*) b - (char*) c ),
+        printf( "c=%p diff=0x%tx bin = %u,%u b_n=%d c_n=%d\n", c, (ptrdiff_t) ( (char*) b - (char*) c ),
                 bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ), chunk_infos[c_n].bin_and_size >> 7, b_n, c_n );
     SM_ASSERT( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 
     void* d = huge_malloc( 2 * chunksize );
-    SM_ASSERT( reinterpret_cast<uint64_t>( d ) % chunksize == 0 );
+    SM_ASSERT( (uint64_t) d % chunksize == 0 );
     chunknumber_t d_n = address_2_chunknumber( d );
-    if( print ) printf( "d=%p c_n=%d d_n=%d diff=%d abs=%d\n", d, c_n, d_n, c_n - d_n, (int) std::abs( (int) c_n - (int) d_n ) );
+    if( print ) printf( "d=%p c_n=%d d_n=%d diff=%d abs=%d\n", d, c_n, d_n, c_n - d_n, (int) abs( (int) c_n - (int) d_n ) );
     SM_ASSERT( bin_from_bin_and_size( chunk_infos[c_n].bin_and_size ) == first_huge_bin_number + 1 );
 
     // Now make sure that a, b, c, d are allocated with no overlaps.
-    SM_ASSERT( abs( long( a_n - b_n ) ) >= 1 );    // a and b must be separated by 1
-    SM_ASSERT( abs( long( a_n - c_n ) ) >= 2 );    // a and c must be separated by 2
-    SM_ASSERT( abs( long( a_n - d_n ) ) >= 2 );    // a and d must be separated by 2
-    SM_ASSERT( abs( long( b_n - c_n ) ) >= 2 );    // b and c must be separated by 2
-    SM_ASSERT( abs( long( b_n - d_n ) ) >= 2 );    // a and d must be separated by 2
-    SM_ASSERT( abs( long( c_n - d_n ) ) >= 2 );    // c and d must be separated by 2
+    SM_ASSERT( abs( a_n - b_n ) >= 1 );    // a and b must be separated by 1
+    SM_ASSERT( abs( a_n - c_n ) >= 2 );    // a and c must be separated by 2
+    SM_ASSERT( abs( a_n - d_n ) >= 2 );    // a and d must be separated by 2
+    SM_ASSERT( abs( b_n - c_n ) >= 2 );    // b and c must be separated by 2
+    SM_ASSERT( abs( b_n - d_n ) >= 2 );    // a and d must be separated by 2
+    SM_ASSERT( abs( c_n - d_n ) >= 2 );    // c and d must be separated by 2
 
     {
-        chunknumber_t m1_n = address_2_chunknumber( reinterpret_cast<void*>( -1 ) );
+        chunknumber_t m1_n = address_2_chunknumber( (void*) ( -1ull ) );
         if( print ) printf( "-1 ==> 0x%x (1<<27)-1=%llx\n", m1_n, ( 1ull << 26 ) - 1 );
         SM_ASSERT( m1_n == ( 1ull << 27 ) - 1 );
         if( print ) printf( "-1 ==> 0x%x\n", m1_n );
     }
 
     {
-        chunknumber_t zero_n = address_2_chunknumber( reinterpret_cast<void*>( 0 ) );
+        chunknumber_t zero_n = address_2_chunknumber( (void*) ( 0 ) );
         if( print ) printf( "0 ==> 0x%x (1<<27)-1=%llx\n", zero_n, ( 1ull << 26 ) - 1 );
         SM_ASSERT( zero_n == 0 );
         if( print ) printf( "-1 ==> 0x%x\n", zero_n );

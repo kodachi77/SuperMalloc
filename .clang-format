@@ -31,7 +31,7 @@ BreakBeforeInheritanceComma: false
 BreakInheritanceList: BeforeColon
 BreakStringLiterals: true
 ColumnLimit: 130
-CompactNamespaces: false
+CompactNamespaces: true
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
 ConstructorInitializerIndentWidth: 4 
 ContinuationIndentWidth: 4
@@ -39,6 +39,7 @@ DerivePointerAlignment: false
 FixNamespaceComments: true
 IncludeBlocks: Preserve
 IndentCaseLabels: true
+IndentExternBlock: NoIndent
 IndentPPDirectives: None
 IndentWidth: 4
 IndentWrappedFunctionNames: false
