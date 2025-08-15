@@ -9,7 +9,7 @@
 
 #include "atomically.h"
 #include "generated_constants.hxx"
-#include "malloc_internal.h"
+#include "sm_internal.h"
 #include "sm_assert.h"
 
 static lock_t huge_lock = SM_LOCK_INITIALIZER;
@@ -101,7 +101,7 @@ get_power_of_two_n_chunks( chunknumber_t n_chunks )
         }
         else
         {
-            int bit = __builtin_ffs( c ) - 1;
+            int bit = SM_BUILTIN_FFS32( c ) - 1;
             // make sure the bit we add doesn't overflow
             while( c + ( 1 << bit ) > end ) bit--;
             put_cached_power_of_two_chunks( c, bit );
@@ -111,7 +111,7 @@ get_power_of_two_n_chunks( chunknumber_t n_chunks )
     // the pieces in the tail of c must be put in the right place.
     while( c < end )
     {
-        int bit = __builtin_ffs( c ) - 1;
+        int bit = SM_BUILTIN_FFS32( c ) - 1;
         while( c + ( 1 << bit ) > end ) bit--;
         put_cached_power_of_two_chunks( c, bit );
         c += ( 1 << bit );

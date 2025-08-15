@@ -4,10 +4,10 @@
 
 #include "atomically.h"
 #include "generated_constants.hxx"
-#include "malloc_internal.h"
+#include "sm_internal.h"
 #include "sm_assert.h"
 #include "sm_atomic.h"
-#include "sm_os.h"
+#include "sm_platform.h"
 
 static lock_t small_locks[first_large_bin_number] = { REPEAT_FOR_SMALL_BINS( SM_LOCK_INITIALIZER ) };
 
@@ -95,7 +95,10 @@ verify_small_invariants()
                 SM_ASSERT( prev_pp == pp->prev );
                 prev_pp      = pp;
                 uint64_t sum = 0;
-                for( uint32_t j = 0; j < folio_bitmap_n_words; j++ ) { sum += __builtin_popcountl( pp->inuse_bitmap[j] ); }
+                for( uint32_t j = 0; j < folio_bitmap_n_words; j++ )
+                {
+                    sum += SM_BUILTIN_POPCOUNT64( pp->inuse_bitmap[j] );
+                }
                 SM_ASSERT( sum == opp - i );
             }
         }
@@ -255,7 +258,7 @@ do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
         {
             // Found an empty bit.
             uint64_t bwbar             = ~bw;
-            int      bit_to_set        = __builtin_ctzl( bwbar );
+            int      bit_to_set        = SM_BUILTIN_CTZ64( bwbar );
             result_pp->inuse_bitmap[w] = bw | ( 1ull << bit_to_set );
 
             SM_LOG_DEBUG( "result_pp  = %p\n", result_pp );
@@ -430,7 +433,7 @@ predo_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi
     uint16_t o_per_folio = static_bin_info[bin].objects_per_folio;
     uint32_t old_count   = 0;
     uint32_t imax        = ceil32( static_bin_info[bin].objects_per_folio, 64 );
-    for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( atomic_load( &pp->inuse_bitmap[i] ) );
+    for( uint32_t i = 0; i < imax; i++ ) old_count += SM_BUILTIN_POPCOUNT64( atomic_load( &pp->inuse_bitmap[i] ) );
     // prefetch for clearing the bit.  We know it was just loaded, so we don't have to load it again.
     SM_ASSERT( objnum / 64 < imax );
     prefetch_write( &pp->inuse_bitmap[objnum / 64] );
@@ -470,7 +473,7 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     uint16_t o_per_folio = static_bin_info[bin].objects_per_folio;
     uint32_t old_count   = 0;
     uint32_t imax        = ceil32( static_bin_info[bin].objects_per_folio, 64 );
-    for( uint32_t i = 0; i < imax; i++ ) old_count += __builtin_popcountl( pp->inuse_bitmap[i] );
+    for( uint32_t i = 0; i < imax; i++ ) old_count += SM_BUILTIN_POPCOUNT64( pp->inuse_bitmap[i] );
     // clear the bit.
     uint64_t old_bits = pp->inuse_bitmap[objnum / 64];
     SM_ASSERT( old_bits & ( 1ull << ( objnum % 64 ) ) );

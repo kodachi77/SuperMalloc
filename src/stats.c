@@ -2,7 +2,7 @@
 
 #include "atomically.h"
 #include "generated_constants.h"
-#include "malloc_internal.h"
+#include "sm_internal.h"
 
 struct bin_stats
 {

@@ -4,11 +4,11 @@
 #include <sys/mman.h>
 #endif
 #ifdef _WIN64
-#include "sm_os.h"
+#include "sm_platform.h"
 #endif
 
 #include "generated_constants.hxx"
-#include "malloc_internal.h"
+#include "sm_internal.h"
 #include "sm_assert.h"
 
 #ifdef TESTING

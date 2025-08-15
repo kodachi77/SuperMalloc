@@ -9,7 +9,7 @@
 #endif
 
 #if defined( assert )
-#warning Use of 'assert' is not recommended, use 'SM_ASSERT' instead.
+//>#warning Use of 'assert' is not recommended, use 'SM_ASSERT' instead.
 #else
 #define assert dont_use_crt_assert__use_SM_ASSERT
 #endif

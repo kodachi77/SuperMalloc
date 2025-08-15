@@ -1,4 +1,4 @@
-#include "sm_os.h"
+#include "sm_platform.h"
 
 #if defined( __linux__ )
 

@@ -14,7 +14,7 @@ subst -cur_console %drive% "%curr_dir%"
 if %errorlevel% neq 0 goto subst_failed
 
 :new_console
-%comspec% -new_console:d:%drive%\src /k %drive%\tools\env.bat
+%comspec% -new_console:d:%drive% /k %drive%\tools\env.bat
 goto end
 
 :subst_failed

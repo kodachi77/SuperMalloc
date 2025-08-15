@@ -7,7 +7,7 @@
 #include "sm_config.h"
 
 #include "atomically.h"
-#include "malloc_internal.h"
+#include "sm_internal.h"
 
 enum
 {

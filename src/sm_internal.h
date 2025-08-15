@@ -76,7 +76,7 @@ static inline uint64_t
 hyperceil( uint64_t a )
 // Effect: Return the smallest power of two >= a.
 {
-    uint64_t r = ( ( a <= 1 ) ? 1 : 1ull << ( 64 - __builtin_clzl( a - 1 ) ) );
+    uint64_t r = ( ( a <= 1 ) ? 1 : 1ull << ( 64 - SM_BUILTIN_CLZ64( a - 1 ) ) );
 #ifdef TESTING
     if( 0 ) printf( "hyperceil(%" PRIu64 ")==%" PRIu64 "\n", a, r );
 #endif
@@ -91,7 +91,7 @@ lg_of_power_of_two( uint64_t a )
 #ifdef TESTING
     SM_ASSERT( ( a & ( a - 1 ) ) == 0 );
 #endif
-    return __builtin_ctzl( a );
+    return SM_BUILTIN_CTZ64( a );
 }
 
 static inline chunknumber_t

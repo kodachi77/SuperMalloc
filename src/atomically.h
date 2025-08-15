@@ -17,7 +17,7 @@
 #include "sm_assert.h"
 #include "sm_atomic.h"
 #include "sm_bitops.h"
-#include "sm_os.h"
+#include "sm_platform.h"
 
 typedef struct lock_t
 {
@@ -150,33 +150,34 @@ enum
 #define SM_DECLARE_ATOMIC_OPERATION( atomic_name, predo, fun, ret_type, ... )                                                    \
     ret_type atomic_name( lock_t* mylock, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                                 \
     {                                                                                                                            \
+        /* {*/                                                                                                                        \
+            sm_lock( mylock );                                                                                                   \
+            ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
+            sm_unlock( mylock );                                                                                                 \
+            return r;                                                                                                            \
+        /*}*/                                                                                                                        \
+        /*DO_FAILED_COUNTS;                                                                                                        \
+        if( do_predo )                                                                                                      \
+            predo( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
         {                                                                                                                        \
             sm_lock( mylock );                                                                                                   \
             ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
             sm_unlock( mylock );                                                                                                 \
             return r;                                                                                                            \
-        }                                                                                                                        \
-        DO_FAILED_COUNTS;                                                                                                        \
-        if( do_predo ) predo( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
-        {                                                                                                                        \
-            sm_lock( mylock );                                                                                                   \
-            ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
-            sm_unlock( mylock );                                                                                                 \
-            return r;                                                                                                            \
-        }                                                                                                                        \
+        }*/                                                                                                                      \
     }
 
 #define SM_DECLARE_ATOMIC_OPERATION2( atomic_name, predo, fun, ret_type, ... )                                                   \
     ret_type atomic_name( lock_t* mylock1, lock_t* mylock2, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )               \
     {                                                                                                                            \
-        {                                                                                                                        \
+        /*{*/                                                                                                                        \
             sm_lock( mylock1 );                                                                                                  \
             sm_lock( mylock2 );                                                                                                  \
             ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
             sm_unlock( mylock2 );                                                                                                \
             sm_unlock( mylock1 );                                                                                                \
             return r;                                                                                                            \
-        }                                                                                                                        \
+        /*}                                                                                                                        \
         DO_FAILED_COUNTS;                                                                                                        \
         if( do_predo ) predo( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
         {                                                                                                                        \
@@ -186,7 +187,7 @@ enum
             sm_unlock( mylock2 );                                                                                                \
             sm_unlock( mylock1 );                                                                                                \
             return r;                                                                                                            \
-        }                                                                                                                        \
+        }*/                                                                                                                        \
     }
 
 #define SM_INVOKE_ATOMIC_OPERATION( mylock, atomic_name, ... )            atomic_name( mylock, ##__VA_ARGS__ )

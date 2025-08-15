@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SM_UNIT_TESTS_H_
+#define SM_UNIT_TESTS_H_
 
 #ifdef __cplusplus
 extern "C"
@@ -6,6 +7,7 @@ extern "C"
 #endif
 
     void initialize_malloc( void );
+	void test_platform( void );
     void test_cache_early( void );
     void test_hyperceil( void );
     void test_size_2_bin( void );
@@ -21,3 +23,5 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* SM_UNIT_TESTS_H_ */

@@ -2,7 +2,7 @@
 
 #include "atomically.h"
 #include "generated_constants.hxx"
-#include "malloc_internal.h"
+#include "sm_internal.h"
 #include "sm_assert.h"
 #include "sm_atomic.h"
 

@@ -1,7 +1,7 @@
-SuperMalloc
-An implementation of malloc() for 64-bit machines
+SuperMalloc is based on the implementation of malloc() for 64-bit machines
 Copyright (c) 2015 Bradley C. Kuszmaul
-Copyright (c) 2022 kodachi77
+
+Copyright (c) 2022-2025 kodachi77
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the “Software”), to deal in

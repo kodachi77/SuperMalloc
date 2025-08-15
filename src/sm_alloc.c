@@ -18,7 +18,7 @@
 #include "atomically.h"
 #include "generated_constants.hxx"
 #include "sm_assert.h"
-#include "sm_os.h"
+#include "sm_platform.h"
 
 #define PREFIX sm_
 
