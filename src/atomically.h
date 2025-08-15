@@ -31,6 +31,8 @@ typedef struct lock_t
     };
 } lock_t;
 
+//>typedef sm_lock_t lock_t;
+
 static inline void
 initialize_lock_array( lock_t* locks, size_t count )
 {
@@ -41,8 +43,8 @@ initialize_lock_array( lock_t* locks, size_t count )
 #elif defined( _WIN64 )
     for( size_t i = 0; i < count; ++i ) { InitializeCriticalSectionAndSpinCount( &locks[i].cs_m, 4000 ); }
 #endif
+    //>for( size_t i = 0; i < count; ++i ) { sm_lock_init( &locks[i] ); }
 }
-
 static inline void
 sm_lock( lock_t* mylock )
 {
@@ -137,7 +139,7 @@ enum
                 }                                                                                                                \
             }                                                                                                                    \
             SM_ASSERT( failed_counts_n < max_failed_counts );                                                                    \
-            failed_counts[failed_counts_n++] = ( struct failed_counts_s ) { name, xr, 1 };                                       \
+            failed_counts[failed_counts_n++] = (struct failed_counts_s) { name, xr, 1 };                                         \
         done:                                                                                                                    \
             sm_lock( &failed_counts_mutex );                                                                                     \
         }                                                                                                                        \
@@ -147,14 +149,14 @@ enum
 #define DO_FAILED_COUNTS (void) 0
 #endif
 
-#define SM_DECLARE_ATOMIC_OPERATION( atomic_name, predo, fun, ret_type, ... )                                                    \
-    ret_type atomic_name( lock_t* mylock, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                                 \
-    {                                                                                                                            \
-        /* {*/                                                                                                                        \
-            sm_lock( mylock );                                                                                                   \
-            ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
-            sm_unlock( mylock );                                                                                                 \
-            return r;                                                                                                            \
+#define SM_DECLARE_ATOMIC_OPERATION( atomic_name, predo, fun, ret_type, ... )                                                        \
+    ret_type atomic_name( lock_t* mylock, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                                     \
+    {                                                                                                                                \
+        /* {*/                                                                                                                       \
+        sm_lock( mylock );                                                                                                           \
+        ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                                    \
+        sm_unlock( mylock );                                                                                                         \
+        return r;                                                                                                                    \
         /*}*/                                                                                                                        \
         /*DO_FAILED_COUNTS;                                                                                                        \
         if( do_predo )                                                                                                      \
@@ -164,19 +166,19 @@ enum
             ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
             sm_unlock( mylock );                                                                                                 \
             return r;                                                                                                            \
-        }*/                                                                                                                      \
+        }*/ \
     }
 
-#define SM_DECLARE_ATOMIC_OPERATION2( atomic_name, predo, fun, ret_type, ... )                                                   \
-    ret_type atomic_name( lock_t* mylock1, lock_t* mylock2, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )               \
-    {                                                                                                                            \
+#define SM_DECLARE_ATOMIC_OPERATION2( atomic_name, predo, fun, ret_type, ... )                                                       \
+    ret_type atomic_name( lock_t* mylock1, lock_t* mylock2, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                   \
+    {                                                                                                                                \
         /*{*/                                                                                                                        \
-            sm_lock( mylock1 );                                                                                                  \
-            sm_lock( mylock2 );                                                                                                  \
-            ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
-            sm_unlock( mylock2 );                                                                                                \
-            sm_unlock( mylock1 );                                                                                                \
-            return r;                                                                                                            \
+        sm_lock( mylock1 );                                                                                                          \
+        sm_lock( mylock2 );                                                                                                          \
+        ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                                    \
+        sm_unlock( mylock2 );                                                                                                        \
+        sm_unlock( mylock1 );                                                                                                        \
+        return r;                                                                                                                    \
         /*}                                                                                                                        \
         DO_FAILED_COUNTS;                                                                                                        \
         if( do_predo ) predo( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                            \
@@ -187,7 +189,7 @@ enum
             sm_unlock( mylock2 );                                                                                                \
             sm_unlock( mylock1 );                                                                                                \
             return r;                                                                                                            \
-        }*/                                                                                                                        \
+        }*/ \
     }
 
 #define SM_INVOKE_ATOMIC_OPERATION( mylock, atomic_name, ... )            atomic_name( mylock, ##__VA_ARGS__ )
@@ -199,17 +201,16 @@ enum
 #define prefetch_read( addr )  __builtin_prefetch( addr, 0, 3 )
 #define prefetch_write( addr ) __builtin_prefetch( addr, 1, 3 )
 #define load_and_prefetch_write( addr )                                                                                          \
-    (                                                                                                                            \
-        {                                                                                                                        \
-            __typeof__( *addr ) ignore __attribute__( ( unused ) ) = atomic_load( addr );                                        \
-            prefetch_write( addr );                                                                                              \
-        } )
+    ( {                                                                                                                          \
+        __typeof__( *addr ) ignore __attribute__( ( unused ) ) = atomic_load( addr );                                            \
+        prefetch_write( addr );                                                                                                  \
+    } )
 #elif _WIN64
 #define prefetch_read( addr )  _mm_prefetch( (const char*) addr, _MM_HINT_T0 )
 #define prefetch_write( addr ) _mm_prefetch( (const char*) addr, _MM_HINT_T0 )
 #define load_and_prefetch_write( addr )                                                                                          \
     do {                                                                                                                         \
-        atomic_ptr s = atomic_load( (volatile atomic_ptr*) addr );                                                               \
+        atomic_ptr s = atomic_load( addr );                                                                                      \
         _mm_prefetch( (const char*) addr, _MM_HINT_T0 );                                                                         \
     } while( 0 )
 #endif

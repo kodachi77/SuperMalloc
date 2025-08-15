@@ -18,6 +18,7 @@
 #include "atomically.h"
 #include "generated_constants.hxx"
 #include "sm_assert.h"
+#include "sm_atomic.h"
 #include "sm_platform.h"
 
 #define PREFIX sm_
@@ -59,10 +60,7 @@ extern "C"
         SM_ASSERT( i <= static_bin_info[g].object_size );
         if( g > 0 )
             SM_ASSERT( i > static_bin_info[g - 1].object_size );
-        else
-        {
-            SM_ASSERT( AND( g == 0, i == 8 ) );
-        }
+        else { SM_ASSERT( AND( g == 0, i == 8 ) ); }
         size_t s = bin_2_size( g );
         SM_ASSERT( s >= i );
         SM_ASSERT( size_2_bin( s ) == g );
@@ -89,16 +87,16 @@ extern "C"
 }
 #endif
 
-static _Atomic atomic_int32 initialize_lock = 0;
-chunk_info*                 chunk_infos;
+static _Atomic( int32_t ) initialize_lock = 0;
+chunk_info*               chunk_infos;
 
 enum
 {
     n_elts = 1ull << 27
 };
 
-_Atomic uint32_t ci_bitfields[n_elts / 32] = { 0 };
-uint32_t         n_cores;
+_Atomic( uint32_t ) ci_bitfields[n_elts / 32] = { 0 };
+uint32_t            n_cores;
 
 #ifdef ENABLE_FAILED_COUNTS
 atomic_stats_s atomic_stats;
@@ -228,10 +226,7 @@ extern "C"
         if( v )
         {
             if( strcmp( v, "0" ) == 0 ) { do_predo = false; }
-            else if( strcmp( v, "1" ) == 0 )
-            {
-                do_predo = true;
-            }
+            else if( strcmp( v, "1" ) == 0 ) { do_predo = true; }
         }
     }
     {
@@ -239,10 +234,7 @@ extern "C"
         if( v )
         {
             if( strcmp( v, "0" ) == 0 ) { use_threadcache = false; }
-            else if( strcmp( v, "1" ) == 0 )
-            {
-                use_threadcache = true;
-            }
+            else if( strcmp( v, "1" ) == 0 ) { use_threadcache = true; }
         }
     }
 
@@ -262,9 +254,14 @@ extern "C"
 void
 maybe_initialize_malloc( void )
 {
-    if( atomic_load( (volatile atomic_ptr*) &chunk_infos ) ) return;
+    if( atomic_load( (atomic_ptr*) &chunk_infos ) ) return;
     while( atomic_test_and_set( &initialize_lock ) ) { _mm_pause(); }
-    if( !chunk_infos ) initialize_malloc();
+    //>    static sm_atomic_guard_t _malloc_initialize = 0;
+    if( !atomic_load( (atomic_ptr*) &chunk_infos ) )
+    //>    sm_atomic_guard( &_malloc_initialize )
+    {
+        if( !chunk_infos ) initialize_malloc();
+    }
     atomic_clear( &initialize_lock );
 }
 
@@ -332,10 +329,7 @@ extern "C"
         // cache line with no issues, since that doesn't cause
         // associativity problems.
         if( size <= cacheline_size || !is_power_of_two( siz ) ) { return cached_malloc( bin ); }
-        else
-        {
-            return cached_malloc( bin + 1 );
-        }
+        else { return cached_malloc( bin + 1 ); }
     }
     else
     {
@@ -648,10 +642,7 @@ test_malloc_usable_size_internal( size_t given_s )
     SM_ASSERT( MALLOC_USABLE_SIZE( base ) == bin_2_size( b ) );
     SM_ASSERT( MALLOC_USABLE_SIZE( base ) + base == MALLOC_USABLE_SIZE( a ) + a );
     if( b < first_huge_bin_number ) { SM_ASSERT( address_2_chunknumber( a ) == address_2_chunknumber( a + as - 1 ) ); }
-    else
-    {
-        SM_ASSERT( offset_in_chunk( base ) == 0 );
-    }
+    else { SM_ASSERT( offset_in_chunk( base ) == 0 ); }
     FREE( a );
 }
 
@@ -814,8 +805,5 @@ bin_and_size_to_bin_and_size( binnumber_t bin, size_t size )
     SM_ASSERT( bin < 127 );
     uint32_t n_pages = (uint32_t) ceil64( size, pagesize );
     if( n_pages < ( 1 << 24 ) ) { return 1 + bin + ( 1 << 7 ) + ( n_pages << 8 ); }
-    else
-    {
-        return 1 + bin + (uint32_t) ( ceil64( size, chunksize ) << 8 );
-    }
+    else { return 1 + bin + (uint32_t) ( ceil64( size, chunksize ) << 8 ); }
 }

@@ -31,37 +31,32 @@
  * 
  * -------------------------------------------------------------------------------*/
 
-
 #ifndef NEW_DELETE_ALLOCATOR_H
 #define NEW_DELETE_ALLOCATOR_H
 
 #include "test_common.h"
 
-
 class NewDeleteAllocatorForTest
 {
-	ThreadTestRes* testRes;
+    ThreadTestRes* testRes;
 
-public:
-	NewDeleteAllocatorForTest( ThreadTestRes* testRes_ ) { testRes = testRes_; }
-	static constexpr bool isFake() { return false; }
+   public:
+    NewDeleteAllocatorForTest( ThreadTestRes* testRes_ ) { testRes = testRes_; }
+    static constexpr bool isFake() { return false; }
 
-	static constexpr const char* name() { return "new-delete allocator"; }
+    static constexpr const char* name() { return "new-delete allocator"; }
 
-	void init() {}
-	void* allocate( size_t sz ) { return new uint8_t[ sz ]; }
-	void deallocate( void* ptr ) { delete [] reinterpret_cast<uint8_t*>(ptr); }
-	void deinit() {}
+    void  init() {}
+    void* allocate( size_t sz ) { return new uint8_t[sz]; }
+    void  deallocate( void* ptr ) { delete[] reinterpret_cast<uint8_t*>( ptr ); }
+    void  deinit() {}
 
-	// next calls are to get additional stats of the allocator, etc, if desired
-	void doWhateverAfterSetupPhase() {}
-	void doWhateverAfterMainLoopPhase() {}
-	void doWhateverAfterCleanupPhase() {}
+    // next calls are to get additional stats of the allocator, etc, if desired
+    void doWhateverAfterSetupPhase() {}
+    void doWhateverAfterMainLoopPhase() {}
+    void doWhateverAfterCleanupPhase() {}
 
-	ThreadTestRes* getTestRes() { return testRes; }
+    ThreadTestRes* getTestRes() { return testRes; }
 };
 
-
-
-
-#endif // NEW_DELETE_ALLOCATOR_H
+#endif    // NEW_DELETE_ALLOCATOR_H

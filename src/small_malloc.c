@@ -4,9 +4,9 @@
 
 #include "atomically.h"
 #include "generated_constants.hxx"
-#include "sm_internal.h"
 #include "sm_assert.h"
 #include "sm_atomic.h"
+#include "sm_internal.h"
 #include "sm_platform.h"
 
 static lock_t small_locks[first_large_bin_number] = { REPEAT_FOR_SMALL_BINS( SM_LOCK_INITIALIZER ) };
@@ -95,10 +95,7 @@ verify_small_invariants()
                 SM_ASSERT( prev_pp == pp->prev );
                 prev_pp      = pp;
                 uint64_t sum = 0;
-                for( uint32_t j = 0; j < folio_bitmap_n_words; j++ )
-                {
-                    sum += SM_BUILTIN_POPCOUNT64( pp->inuse_bitmap[j] );
-                }
+                for( uint32_t j = 0; j < folio_bitmap_n_words; j++ ) { sum += SM_BUILTIN_POPCOUNT64( pp->inuse_bitmap[j] ); }
                 SM_ASSERT( sum == opp - i );
             }
         }
@@ -147,13 +144,13 @@ predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
     if( fullest == 0 ) return;    // A chunk must be allocated.
     uint16_t   o_per_folio  = static_bin_info[bin].objects_per_folio;
     uint32_t   fetch_offset = fullest;
-    per_folio* result_pp    = atomic_load( (volatile atomic_ptr*) &dsbi.lists.b[dsbi_offset + fetch_offset] );
+    per_folio* result_pp    = atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + fetch_offset] );
     if( result_pp == NULL )
     {
         if( fullest == o_per_folio )
         {
             fetch_offset++;
-            result_pp = atomic_load( (volatile atomic_ptr*) &dsbi.lists.b[dsbi_offset + fetch_offset] );
+            result_pp = atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + fetch_offset] );
         }
         if( result_pp == NULL )
         {
@@ -163,10 +160,10 @@ predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
     prefetch_write( &dsbi.lists.b[dsbi_offset + fetch_offset] );    // previously fetched, so just make it writeable
 
     per_folio* next = result_pp->next;
-    if( next ) { load_and_prefetch_write( &next->prev ); }
-    per_folio* old_h_below = atomic_load( (volatile atomic_ptr*) &dsbi.lists.b[dsbi_offset + fullest - 1] );
+    if( next ) { load_and_prefetch_write( (atomic_ptr*) &next->prev ); }
+    per_folio* old_h_below = atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + fullest - 1] );
     prefetch_write( &dsbi.lists.b[dsbi_offset + fullest - 1] );    // previously fetched
-    if( old_h_below ) { load_and_prefetch_write( &old_h_below->prev ); }
+    if( old_h_below ) { load_and_prefetch_write( (atomic_ptr*) &old_h_below->prev ); }
 
     // set the new fullest
     prefetch_write( &dsbi.fullest_offset[bin] );    // previously fetched
@@ -175,7 +172,7 @@ predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
     {
         for( uint32_t new_fullest = 1; new_fullest <= o_per_folio; new_fullest++ )
         {
-            if( atomic_load( (volatile atomic_ptr*) &dsbi.lists.b[dsbi_offset + new_fullest] ) ) { break; }
+            if( atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + new_fullest] ) ) { break; }
         }
     }
 
@@ -408,19 +405,17 @@ extern "C"
     // TODO: write to debug stream when in release mode
     printf( "%fns/small_malloc\n", tdiff( &start, &end ) * 1e9 / ncalls );
 #endif
-    WHEN_MICROTIMING( (
-        {
-            printf( "%5.1f clocks/small_malloc\n", clocks_in_small_malloc / (double) ncalls );
-            printf( "%5.1f clocks/small_malloc spent early small malloc\n",
-                    clocks_spent_in_early_small_malloc / (double) ncalls );
-            printf( "%5.1f clocks/small_malloc spent initializing small chunks\n",
-                    clocks_spent_initializing_small_chunks / (double) ncalls );
-            printf( "%5.1f clocks/small_malloc spent in do_small_malloc\n", clocks_spent_in_do_small_malloc / (double) ncalls );
-            printf( "%5.1f clocks/small_malloc unaccounted for\n",
-                    ( clocks_in_small_malloc - clocks_spent_in_early_small_malloc - clocks_spent_initializing_small_chunks
-                      - clocks_spent_in_do_small_malloc )
-                        / (double) ncalls );
-        } ) );
+    WHEN_MICROTIMING( ( {
+        printf( "%5.1f clocks/small_malloc\n", clocks_in_small_malloc / (double) ncalls );
+        printf( "%5.1f clocks/small_malloc spent early small malloc\n", clocks_spent_in_early_small_malloc / (double) ncalls );
+        printf( "%5.1f clocks/small_malloc spent initializing small chunks\n",
+                clocks_spent_initializing_small_chunks / (double) ncalls );
+        printf( "%5.1f clocks/small_malloc spent in do_small_malloc\n", clocks_spent_in_do_small_malloc / (double) ncalls );
+        printf( "%5.1f clocks/small_malloc unaccounted for\n",
+                ( clocks_in_small_malloc - clocks_spent_in_early_small_malloc - clocks_spent_initializing_small_chunks
+                  - clocks_spent_in_do_small_malloc )
+                    / (double) ncalls );
+    } ) );
 
     for( int i = 0; i < ncalls; i++ ) { small_free( array[i] ); }
     free( array );
@@ -442,25 +437,22 @@ predo_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi
     uint32_t old_offset_dsbi   = dsbi_offset + old_offset_within;
     uint32_t new_offset        = old_offset_dsbi + 1;
 
-    per_folio* pp_next = atomic_load( (volatile atomic_ptr*) &pp->next );
-    per_folio* pp_prev = atomic_load( (volatile atomic_ptr*) &pp->prev );
+    per_folio* pp_next = atomic_load( (atomic_ptr*) &pp->next );
+    per_folio* pp_prev = atomic_load( (atomic_ptr*) &pp->prev );
 
     prefetch_write( &pp->next );
     prefetch_write( &pp->prev );
-    if( pp_prev == NULL ) { load_and_prefetch_write( &dsbi.lists.b[old_offset_dsbi] ); }
-    else
-    {
-        load_and_prefetch_write( &pp_prev->next );
-    }
-    if( pp_next != NULL ) { load_and_prefetch_write( &pp_next->prev ); }
+    if( pp_prev == NULL ) { load_and_prefetch_write( (atomic_ptr*) &dsbi.lists.b[old_offset_dsbi] ); }
+    else { load_and_prefetch_write( (atomic_ptr*) &pp_prev->next ); }
+    if( pp_next != NULL ) { load_and_prefetch_write( (atomic_ptr*) &pp_next->prev ); }
     // prefetch for fixing up the count
-    uint32_t fullest_off = atomic_load( &dsbi.fullest_offset[bin] );
+    uint32_t fullest_off = atomic_load( (atomic_ptr*) &dsbi.fullest_offset[bin] );
     if( old_offset_within == 0 || ( pp_next == NULL && fullest_off == old_offset_within ) )
     {
         prefetch_write( &dsbi.fullest_offset[bin] );
     }
-    per_folio* new_next = atomic_load( (volatile atomic_ptr*) &dsbi.lists.b[new_offset] );
-    if( new_next ) { load_and_prefetch_write( &new_next->prev ); }
+    per_folio* new_next = atomic_load( (atomic_ptr*) &dsbi.lists.b[new_offset] );
+    if( new_next ) { load_and_prefetch_write( (atomic_ptr*) &new_next->prev ); }
     prefetch_write( &dsbi.lists.b[new_offset] );
 }
 
@@ -493,17 +485,11 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
         SM_ASSERT( dsbi.lists.b[old_offset_dsbi] == pp );
         dsbi.lists.b[old_offset_dsbi] = pp_next;
     }
-    else
-    {
-        pp_prev->next = pp_next;
-    }
+    else { pp_prev->next = pp_next; }
     if( pp_next != NULL ) { pp_next->prev = pp_prev; }
     // Fix up the old_count
     if( old_offset_within == 0 ) { dsbi.fullest_offset[bin] = new_offset_within; }
-    else if( pp_next == NULL && dsbi.fullest_offset[bin] == old_offset_within )
-    {
-        dsbi.fullest_offset[bin] = new_offset_within;
-    }
+    else if( pp_next == NULL && dsbi.fullest_offset[bin] == old_offset_within ) { dsbi.fullest_offset[bin] = new_offset_within; }
     // Add to new list
     SM_ASSERT( new_offset < dsbi_offset + o_per_folio + 1 );
     if( new_offset != dsbi_offset + o_per_folio || dsbi.lists.b[new_offset] == NULL )
@@ -535,10 +521,10 @@ SM_DECLARE_ATOMIC_OPERATION( __small_free, predo_small_free, do_small_free, per_
 void
 predo_small_free_post_madvise( per_folio* pp, uint32_t total_dsbi_offset )
 {
-    per_folio* new_next = atomic_load( (volatile atomic_ptr*) &dsbi.lists.b[total_dsbi_offset] );
+    per_folio* new_next = atomic_load( (atomic_ptr*) &dsbi.lists.b[total_dsbi_offset] );
     prefetch_write( &pp->prev );
     prefetch_write( &pp->next );
-    if( new_next ) { load_and_prefetch_write( &new_next->prev ); }
+    if( new_next ) { load_and_prefetch_write( (atomic_ptr*) &new_next->prev ); }
     prefetch_write( &dsbi.lists.b[total_dsbi_offset] );
 }
 

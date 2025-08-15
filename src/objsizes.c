@@ -55,28 +55,16 @@ static uint32_t
 calculate_shift_magic( uint64_t d )
 {
     if( d > chunksize ) { return 1; }
-    else if( is_power_of_two( d ) )
-    {
-        return ceil_log_2( d );
-    }
-    else
-    {
-        return 32 + ceil_log_2( d );
-    }
+    else if( is_power_of_two( d ) ) { return ceil_log_2( d ); }
+    else { return 32 + ceil_log_2( d ); }
 }
 
 static uint64_t
 calculate_multiply_magic( uint64_t d )
 {
     if( d > chunksize ) { return 1; }
-    else if( is_power_of_two( d ) )
-    {
-        return 1;
-    }
-    else
-    {
-        return ( d - 1 + ( 1ull << calculate_shift_magic( d ) ) ) / d;
-    }
+    else if( is_power_of_two( d ) ) { return 1; }
+    else { return ( d - 1 + ( 1ull << calculate_shift_magic( d ) ) ) / d; }
 }
 
 static uint64_t

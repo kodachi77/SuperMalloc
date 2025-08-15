@@ -2,9 +2,9 @@
 
 #include "atomically.h"
 #include "generated_constants.hxx"
-#include "sm_internal.h"
 #include "sm_assert.h"
 #include "sm_atomic.h"
+#include "sm_internal.h"
 
 #ifdef ENABLE_LOG_CHECKING
 static void clog_command( char command, const void* ptr, size_t size );
@@ -110,10 +110,7 @@ cache_destructor( void* v )
             {
                 next = head->next;
                 if( bin < first_large_bin_number ) { small_free( head ); }
-                else
-                {
-                    large_free( head );
-                }
+                else { large_free( head ); }
             }
         }
     }
@@ -168,7 +165,7 @@ static CacheForCpu cache_for_cpu[cpulimit] = { 0 };
 
 typedef struct GlobalCacheForBin
 {
-    _Atomic        SM_ALIGNED( 64 ) uint8_t n_nonempty_caches;
+    _Atomic SM_ALIGNED( 64 ) uint8_t n_nonempty_caches;
     cached_objects co[global_cache_depth];
 } GlobalCacheForBin;
 
@@ -269,10 +266,7 @@ do_remove_a_cache_from_cpu( CacheForBin* cc, cached_objects* co )
         *co       = cc->co[1];
         cc->co[1] = empty_cached_objects;
     }
-    else
-    {
-        *co = empty_cached_objects;
-    }
+    else { *co = empty_cached_objects; }
     return true;
 }
 
@@ -325,10 +319,7 @@ predo_add_a_cache_to_cpu(
     if( bc0 != 0 && bc1 != 0 )
     {
         if( bc0 <= bc1 ) { prefetch_write( cc->co[0].tail ); }
-        else
-        {
-            prefetch_write( cc->co[1].tail );
-        }
+        else { prefetch_write( cc->co[1].tail ); }
     }
 }
 
@@ -341,10 +332,7 @@ do_add_a_cache_to_cpu( CacheForBin* cc,
     uint64_t bc0 = cc->co[0].bytecount;
     uint64_t bc1 = cc->co[1].bytecount;
     if( bc0 == 0 ) { cc->co[0] = *co; }
-    else if( bc1 == 0 )
-    {
-        cc->co[1] = *co;
-    }
+    else if( bc1 == 0 ) { cc->co[1] = *co; }
     else if( bc0 <= bc1 )
     {
         // add it to c0
@@ -557,13 +545,10 @@ predo_get_global_cached( CacheForBin* cb, GlobalCacheForBin* gb, uint64_t siz )
             cached_objects* co  = co0->bytecount < co1->bytecount ? co0 : co1;
             if( co->head == NULL )
             {
-                linked_list* ignore = atomic_load( (volatile atomic_ptr*) &gb->co[n - 1].tail );
+                linked_list* ignore = atomic_load( (atomic_ptr*) &gb->co[n - 1].tail );
                 prefetch_write( &co->tail );    // already fetched as part of co->head
             }
-            else
-            {
-                load_and_prefetch_write( &gb->co[n - 1].tail->next );
-            }
+            else { load_and_prefetch_write( (atomic_ptr*) &gb->co[n - 1].tail->next ); }
             prefetch_write( &co->head );
         }
         prefetch_write( &gb->n_nonempty_caches );
@@ -587,20 +572,14 @@ do_get_global_cached( CacheForBin* cb, GlobalCacheForBin* gb, uint64_t siz )
 
             linked_list* co_head = co->head;
             if( co_head == NULL ) { co->tail = gb->co[n - 1].tail; }
-            else
-            {
-                gb->co[n - 1].tail->next = co_head;
-            }
+            else { gb->co[n - 1].tail->next = co_head; }
             co->head      = result_next;
             co->bytecount = gb->co[n - 1].bytecount - siz;
         }
         gb->n_nonempty_caches = n - 1;
         return result;
     }
-    else
-    {
-        return 0;
-    }
+    else { return 0; }
 }
 
 SM_DECLARE_ATOMIC_OPERATION2( get_global_cached, predo_get_global_cached, do_get_global_cached, void*, CacheForBin*,
@@ -723,10 +702,7 @@ try_put_cached( linked_list* obj, cached_objects* co, uint64_t size, uint64_t ca
         }
         return true;
     }
-    else
-    {
-        return false;
-    }
+    else { return false; }
 }
 
 // This is not called atomically, it's only operating on thread cache
@@ -937,10 +913,7 @@ cached_free( void* ptr, binnumber_t bin )
 
     // Finally must really do the work.
     if( bin < first_large_bin_number ) { small_free( ptr ); }
-    else
-    {
-        large_free( ptr );
-    }
+    else { large_free( ptr ); }
 }
 
 #ifdef ENABLE_STATS

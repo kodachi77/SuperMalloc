@@ -59,6 +59,7 @@ filter { "configurations:Release" }
 
 filter { "system:windows" }
     platforms { "x64" }
+    --buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc", "/experimental:c11atomics" }
 
 filter { "system:windows", "configurations:Release" }
     flags { "NoIncrementalLink" }
@@ -66,6 +67,7 @@ filter { "system:windows", "configurations:Release" }
 filter { "system:linux" }
     platforms { "linux64" }
     links { "pthread", "dl" }
+    buildoptions { "-std=c11", "-x", "c" }
 
 filter { "action:vs*" }
     defines { "_CRT_SECURE_NO_DEPRECATE", "_CRT_SECURE_NO_WARNINGS", "_CRT_NONSTDC_NO_WARNINGS" }
@@ -82,7 +84,7 @@ project "objsizes"
     kind "ConsoleApp"
     language "C"
     cdialect "C11"
-    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc", "/experimental:c11atomics" }
     files { "src/objsizes.c" }
     postbuildcommands { "%{cfg.buildtarget.abspath} src/generated_constants.cxx > src/generated_constants.hxx" }
 
@@ -90,7 +92,7 @@ project "supermalloc"
     kind "StaticLib"
     language "C"
     cdialect "C11"
-    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc", "/experimental:c11atomics" }
     dependson { "objsizes" }
     files { "src/*.c", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
     excludes { "src/objsizes.c", "src/unit-tests.c", "src/unit-tests.h" }
@@ -101,7 +103,9 @@ project "supermalloc_test"
     kind "ConsoleApp"
     language "C"
     cdialect "C11"
-    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+
+    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc", "/experimental:c11atomics" }
+
     files { "src/*.c", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
     excludes { "src/objsizes.c" }
     defines { "TESTING" }
@@ -135,7 +139,7 @@ project "larson"
     kind "ConsoleApp"
     language "C"
     cdialect "C11"
-    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    --buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
     files { "benchmarks/larson/larson.c" }
     includedirs {"src" }
     links { "supermalloc" }
@@ -144,7 +148,7 @@ project "xmalloc-test"
     kind "ConsoleApp"
     language "C"
     cdialect "C11"
-    buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
+    --buildoptions { "/Zc:preprocessor", "/volatile:iso", "/std:c11", "/TC", "/EHc" }
     files { "benchmarks/xmalloc-test/*.c", "benchmarks/xmalloc-test/*.h" }
     includedirs {"src" }
     links { "supermalloc" }

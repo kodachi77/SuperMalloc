@@ -6,9 +6,9 @@
 #endif
 
 #ifdef __WIN32__
-#include <stdbool.h>
 #include <conio.h>
 #include <process.h>
+#include <stdbool.h>
 #include <time.h>
 #include <windows.h>
 
@@ -22,7 +22,7 @@ __sync_bool_compare_and_swap( unsigned long volatile* dst, unsigned long oldi, u
 }
 
 #define __sync_fetch_and_add( a, b )                                                                                             \
-    sizeof( *( a ) ) == sizeof( __int64 ) ? InterlockedExchangeAdd64( (volatile __int64*) ( a ), (__int64)( b ) ) :                \
+    sizeof( *( a ) ) == sizeof( __int64 ) ? InterlockedExchangeAdd64( (volatile __int64*) ( a ), (__int64) ( b ) ) :             \
                                             InterlockedExchangeAdd( (volatile long*) ( a ), (long) ( b ) )
 
 #define __ATOMIC_CONSUME 0
@@ -32,7 +32,7 @@ static inline unsigned long
 __atomic_load_n( unsigned long* ptr, int memorder )
 {
     (void) memorder;
-    return (unsigned long)_InterlockedOr( (volatile long*) ptr, 0 );
+    return (unsigned long) _InterlockedOr( (volatile long*) ptr, 0 );
 }
 
 #else
@@ -69,7 +69,7 @@ enum
 #endif
 #include <assert.h>
 #define _ASSERTE( x ) assert( x )
-#define _inline inline
+#define _inline       inline
 void
 Sleep( long x )
 {
@@ -221,7 +221,6 @@ typedef struct thr_data
 
     struct variance_sum vsum;
 
-
 } thread_data;
 
 void         runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, int num_rounds );
@@ -252,11 +251,13 @@ int cChecked = 0;
 #if defined( _WIN32 )
 extern HANDLE crtheap;
 #endif
-#if defined(__linux__)
-static long getmaxrss(void) {
+#if defined( __linux__ )
+static long
+getmaxrss( void )
+{
     struct rusage ru;
-    int r __attribute__((unused)) = getrusage(RUSAGE_SELF, &ru);
-    assert(r==0);
+    int           r __attribute__( ( unused ) ) = getrusage( RUSAGE_SELF, &ru );
+    assert( r == 0 );
     return ru.ru_maxrss;
 }
 #else
@@ -266,8 +267,8 @@ getmaxrss( void )
     return 0;
 }
 #endif
-const bool time_variance = true;
-unsigned long slowest = 0;
+const bool    time_variance = true;
+unsigned long slowest       = 0;
 unsigned long slow_count    = 0;
 
 enum
@@ -276,7 +277,7 @@ enum
 };
 
 unsigned long slow_instance[n_slow_instance];
-static double get_variance(void);
+static double get_variance( void );
 
 int
 main( int argc, char* argv[] )
@@ -324,8 +325,9 @@ main( int argc, char* argv[] )
         seed        = atoi( argv[6] );
         max_threads = atoi( argv[7] );
         min_threads = max_threads;
-    printf ("sleep = %ld, min = %d, max = %d, per thread = %d, num rounds = %d, seed = %d, max_threads = %d, min_threads = %d\n",
-	    sleep_cnt, min_size, max_size, chperthread, num_rounds, seed, max_threads, min_threads);
+        printf(
+            "sleep = %ld, min = %d, max = %d, per thread = %d, num rounds = %d, seed = %d, max_threads = %d, min_threads = %d\n",
+            sleep_cnt, min_size, max_size, chperthread, num_rounds, seed, max_threads, min_threads );
         goto DoneWithInput;
     }
 
@@ -393,55 +395,54 @@ DoneWithInput:
     //_cputs("Hit any key to exit...") ;	(void)_getch() ;
 #endif
 
-fprintf(stderr, "maxrss=%ld slowest=%ld sqrt(variance)=%f\nslows(%lu)={", getmaxrss(), slowest, sqrt(get_variance()), slow_count);
-  for (unsigned long i = 0; i < slow_count && i < n_slow_instance; i++) {
-    printf("%lu ", slow_instance[i]);
-  }
-  printf("}\n");
-  
+    fprintf( stderr, "maxrss=%ld slowest=%ld sqrt(variance)=%f\nslows(%lu)={", getmaxrss(), slowest, sqrt( get_variance() ),
+             slow_count );
+    for( unsigned long i = 0; i < slow_count && i < n_slow_instance; i++ ) { printf( "%lu ", slow_instance[i] ); }
+    printf( "}\n" );
 
     return 0;
 
 } /* main */
 
-struct variance_sum global_vsum = {0,0,0};
+struct variance_sum global_vsum = { 0, 0, 0 };
 
-static double get_variance(void) {
-  unsigned long Ex = global_vsum.Ex;
-  unsigned long Ex2 = global_vsum.Ex2;
-  double s2 = ((double)(Ex*Ex))/slow_count;
-  return (Ex2 - s2)/global_vsum.n;
+static double
+get_variance( void )
+{
+    unsigned long Ex  = global_vsum.Ex;
+    unsigned long Ex2 = global_vsum.Ex2;
+    double        s2  = ( (double) ( Ex * Ex ) ) / slow_count;
+    return ( Ex2 - s2 ) / global_vsum.n;
 }
 
-static char *my_malloc(size_t size, struct variance_sum *vs) {
-  struct timespec start,end;
-  if (time_variance) {
-    clock_gettime(CLOCK_MONOTONIC, &start);
-  }
-  char * result = (char *) CUSTOM_MALLOC(size);
-  if (time_variance) {
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    unsigned long diff = (end.tv_sec - start.tv_sec)*1000000000 + (end.tv_nsec - start.tv_nsec);
-    if (diff > 1000) {
-      int c = __sync_fetch_and_add(&slow_count, 1);
-      if (c < n_slow_instance) {
-	slow_instance[c] = diff;
-      }
+static char*
+my_malloc( size_t size, struct variance_sum* vs )
+{
+    struct timespec start, end;
+    if( time_variance ) { clock_gettime( CLOCK_MONOTONIC, &start ); }
+    char* result = (char*) CUSTOM_MALLOC( size );
+    if( time_variance )
+    {
+        clock_gettime( CLOCK_MONOTONIC, &end );
+        unsigned long diff = ( end.tv_sec - start.tv_sec ) * 1000000000 + ( end.tv_nsec - start.tv_nsec );
+        if( diff > 1000 )
+        {
+            int c = __sync_fetch_and_add( &slow_count, 1 );
+            if( c < n_slow_instance ) { slow_instance[c] = diff; }
+        }
+        // Compute variance:
+        vs->Ex += diff;
+        vs->Ex2 += diff * diff;
+        vs->n++;
+        while( 1 )
+        {    // store max atomically
+            unsigned long slowest_v = __atomic_load_n( &slowest, __ATOMIC_CONSUME );
+            if( slowest_v > diff ) break;
+            if( __sync_bool_compare_and_swap( &slowest, slowest_v, diff ) ) break;
+        }
     }
-    // Compute variance:
-    vs->Ex+=diff;
-    vs->Ex2+=diff*diff;
-    vs->n++;
-    while (1) { // store max atomically
-      unsigned long slowest_v = __atomic_load_n(&slowest, __ATOMIC_CONSUME);
-      if (slowest_v > diff) break;
-      if (__sync_bool_compare_and_swap(&slowest, slowest_v, diff)) break;
-    }
-  }
-  for (size_t i = 0; i < size; i++) {
-    result[i] = i;
-  }
-  return result;
+    for( size_t i = 0; i < size; i++ ) { result[i] = i; }
+    return result;
 }
 
 void
@@ -457,10 +458,10 @@ runloops( long sleep_cnt, int num_chunks )
     long start_cnt, end_cnt;
 #endif
     __int64 ticks;
-    double duration;
-    double reqd_space;
-    ULONG  used_space = 0;
-    long   sum_allocs = 0;
+    double  duration;
+    double  reqd_space;
+    ULONG   used_space = 0;
+    long    sum_allocs = 0;
 
     QueryPerformanceFrequency( &ticks_per_sec );
     QueryPerformanceCounter( &start_cnt );
@@ -468,14 +469,11 @@ runloops( long sleep_cnt, int num_chunks )
     for( cblks = 0; cblks < num_chunks; cblks++ )
     {
         if( max_size == min_size ) { blk_size = min_size; }
-        else
-        {
-            blk_size = min_size + lran2( &rgen ) % ( max_size - min_size );
-        }
+        else { blk_size = min_size + lran2( &rgen ) % ( max_size - min_size ); }
 #ifdef CPP
         blkp[cblks] = new char[blk_size];
 #else
-    blkp[cblks] = (char *) my_malloc(blk_size, &global_vsum) ;
+        blkp[cblks] = (char*) my_malloc( blk_size, &global_vsum );
 #endif
         blksize[cblks] = blk_size;
         assert( blkp[cblks] != NULL );
@@ -497,14 +495,11 @@ runloops( long sleep_cnt, int num_chunks )
 #endif
 
             if( max_size == min_size ) { blk_size = min_size; }
-            else
-            {
-                blk_size = min_size + lran2( &rgen ) % ( max_size - min_size );
-            }
+            else { blk_size = min_size + lran2( &rgen ) % ( max_size - min_size ); }
 #if defined( CPP )
             blkp[victim] = new char[blk_size];
 #else
-      blkp[victim] = (char *) my_malloc(blk_size, &global_vsum) ;
+            blkp[victim] = (char*) my_malloc( blk_size, &global_vsum );
 #endif
             blksize[victim] = blk_size;
             assert( blkp[victim] != NULL );
@@ -540,8 +535,8 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
     thread_data* pdea;
     long         nperthread;
     long         sum_threads;
-    __int64       sum_allocs;
-    __int64       sum_frees;
+    __int64      sum_allocs;
+    __int64      sum_frees;
     double       duration;
 #ifdef __WIN32__
     LARGE_INTEGER ticks_per_sec, start_cnt, end_cnt;
@@ -550,11 +545,11 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
     long start_cnt, end_cnt;
 #endif
     __int64 ticks;
-    double rate_1 = 0, rate_n;
-    double reqd_space;
-    ULONG  used_space;
-    int    prevthreads;
-    int    i;
+    double  rate_1 = 0, rate_n;
+    double  reqd_space;
+    ULONG   used_space;
+    int     prevthreads;
+    int     i;
 
     QueryPerformanceFrequency( &ticks_per_sec );
 
@@ -585,7 +580,7 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
             de_area[i].cFrees   = 0;
             de_area[i].cThreads = 0;
             de_area[i].finished = FALSE;
-            memset(&de_area[i].vsum, 0, sizeof(struct variance_sum));    //(struct variance_sum){0,0,0};
+            memset( &de_area[i].vsum, 0, sizeof( struct variance_sum ) );    //(struct variance_sum){0,0,0};
             lran2_init( &de_area[i].rgen, de_area[i].seed );
 
 #ifdef __WIN32__
@@ -626,9 +621,9 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
             sum_frees += de_area[i].cFrees;
             sum_threads += de_area[i].cThreads;
             de_area[i].cAllocs = de_area[i].cFrees = 0;
-	global_vsum.Ex += de_area[i].vsum.Ex;
-	global_vsum.Ex2 += de_area[i].vsum.Ex2;
-	global_vsum.n   += de_area[i].vsum.n;
+            global_vsum.Ex += de_area[i].vsum.Ex;
+            global_vsum.Ex2 += de_area[i].vsum.Ex2;
+            global_vsum.n += de_area[i].vsum.n;
         }
 
 #ifdef __WIN32__
@@ -704,14 +699,11 @@ exercise_heap( void* pinput )
         pdea->cFrees++;
 
         if( range == 0 ) { blk_size = pdea->min_size; }
-        else
-        {
-            blk_size = pdea->min_size + lran2( &pdea->rgen ) % range;
-        }
+        else { blk_size = pdea->min_size + lran2( &pdea->rgen ) % range; }
 #ifdef CPP
         pdea->array[victim] = new char[blk_size];
 #else
-    pdea->array[victim] = (char *) my_malloc(blk_size, &pdea->vsum) ;
+        pdea->array[victim] = (char*) my_malloc( blk_size, &pdea->vsum );
 #endif
 
         pdea->blksize[victim] = blk_size;
@@ -725,8 +717,8 @@ exercise_heap( void* pinput )
         *chptr++             = 'a';
         // This read doesn't do anything in a modern compiler.  Do an atomic load instead.
         //volatile char ch     = *( (char*) pdea->array[victim] );
-		__atomic_load_n(((char *) pdea->array[victim]), __ATOMIC_CONSUME);
-        *chptr               = 'b';
+        __atomic_load_n( ( (char*) pdea->array[victim] ), __ATOMIC_CONSUME );
+        *chptr = 'b';
 
         if( stopflag ) break;
     }
@@ -768,14 +760,11 @@ warmup( char** blkp, int num_chunks )
     for( cblks = 0; cblks < num_chunks; cblks++ )
     {
         if( min_size == max_size ) { blk_size = min_size; }
-        else
-        {
-            blk_size = min_size + lran2( &rgen ) % ( max_size - min_size );
-        }
+        else { blk_size = min_size + lran2( &rgen ) % ( max_size - min_size ); }
 #ifdef CPP
         blkp[cblks] = new char[blk_size];
 #else
-    blkp[cblks] = (char *) my_malloc(blk_size, &global_vsum) ;
+        blkp[cblks] = (char*) my_malloc( blk_size, &global_vsum );
 #endif
         blksize[cblks] = blk_size;
         assert( blkp[cblks] != NULL );
@@ -807,10 +796,7 @@ warmup( char** blkp, int num_chunks )
 #endif
 
         if( max_size == min_size ) { blk_size = min_size; }
-        else
-        {
-            blk_size = min_size + lran2( &rgen ) % ( max_size - min_size );
-        }
+        else { blk_size = min_size + lran2( &rgen ) % ( max_size - min_size ); }
 #ifdef CPP
         blkp[victim] = new char[blk_size];
 #else

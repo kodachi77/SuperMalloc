@@ -8,8 +8,8 @@
 
 #include "atomically.h"
 #include "generated_constants.hxx"
-#include "sm_internal.h"
 #include "sm_assert.h"
+#include "sm_internal.h"
 
 #ifdef ENABLE_LOG_CHECKING
 static void log_command( char command, const void* ptr );
@@ -161,7 +161,7 @@ large_malloc( size_t size )
                 {
                     large_object_list_cell* old_first = *free_head;
                     entry[objects_per_chunk - 1].next = old_first;
-                    if( atomic_compare_and_swap( (volatile atomic_ptr*) free_head, old_first, &entry[0] ) ) break;
+                    if( atomic_compare_and_swap( (atomic_ptr*) free_head, &old_first, &entry[0] ) ) break; //> added &
                 }
             }
 
@@ -225,9 +225,9 @@ large_free( void* p )
     {
         while( 1 )
         {
-            large_object_list_cell* first = atomic_load( (volatile atomic_ptr*) h );
+            large_object_list_cell* first = atomic_load( (atomic_ptr*) h );
             ei->next                      = first;
-            if( atomic_compare_and_swap( (volatile atomic_ptr*) h, first, ei ) ) break;
+            if( atomic_compare_and_swap( (atomic_ptr*) h, &first, ei ) ) break; //> added &
         }
     }
 }

@@ -8,8 +8,8 @@
 #endif
 
 #include "generated_constants.hxx"
-#include "sm_internal.h"
 #include "sm_assert.h"
+#include "sm_internal.h"
 
 #ifdef TESTING
 #include <string.h>
@@ -17,8 +17,8 @@
 
 // Nothing in this file seems to need locking.  We rely on the thread safety of mmap and munmap.
 
-static size_t total_mapped          = 0;
-static size_t mismapped_so_unmapped = 0;
+static _Atomic( size_t ) total_mapped          = 0;
+static _Atomic( size_t ) mismapped_so_unmapped = 0;
 
 void*
 mmap_size( size_t size )
@@ -52,7 +52,7 @@ mmap_size( size_t size )
         return NULL;
     }
 
-    atomic_fetch_add( (volatile atomic_uint64*) &total_mapped, size );
+    atomic_fetch_add( &total_mapped, size );
 
 #endif
     return r;
@@ -90,7 +90,7 @@ unmap( void* p, size_t size )
             size -= minfo.RegionSize;
         }
 
-        atomic_fetch_add( (volatile atomic_uint64*) &mismapped_so_unmapped, size );
+        atomic_fetch_add( &mismapped_so_unmapped, size );
     }
 #endif
 }

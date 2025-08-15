@@ -187,20 +187,28 @@ commit_ci_page_as_needed( chunknumber_t chunknum )
 void* mmap_allocate_space( size_t size );
 void  mmap_commit_page( void* ptr, size_t size );
 
+enum
+{
+    CI_UNCOMMITTED = 0,
+    CI_COMMITTING  = 2,
+    CI_COMMITTED   = 1
+};
+
+//extern _Atomic( uint8_t ) *ci_state;
 extern _Atomic uint32_t ci_bitfields[];
 extern chunk_info*      chunk_infos;
 
 static inline int
 check_ci_bit( uint32_t k )
 {
-    uint32_t bits = atomic_load( (volatile atomic_uint32*) &ci_bitfields[k / 32] );
+    uint32_t bits = atomic_load( (atomic_ptr*) &ci_bitfields[k / 32] );
     return ( ( bits & ( 1 << ( k % 32 ) ) ) != 0 );
 }
 
 static inline void
 set_ci_bit( uint32_t k )
 {
-    atomic_fetch_or( (volatile atomic_uint32*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
+    atomic_fetch_or( (atomic_ptr*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
 }
 
 static inline void
@@ -218,6 +226,31 @@ commit_ci_page_as_needed( chunknumber_t chunknum )
         set_ci_bit( bit );
     }
 }
+
+/* CHECK!!!!!!!!!!
+static inline void
+commit_ci_page_as_needed( chunknumber_t chunknum )
+{
+    const uint32_t n_ci_elts = pagesize / sizeof( chunk_info );
+    const uint32_t bit       = (uint32_t) ( chunknum / n_ci_elts );
+    uint8_t        expected  = CI_UNCOMMITTED;
+    if( sm_atomic_cas_strong_acq_rel( &ci_state[bit], &expected, CI_COMMITTING ) )
+    {
+        void* ptr = (char*) chunk_infos + (size_t) bit * pagesize;
+        mmap_commit_page( ptr, pagesize );
+        sm_atomic_store_release( &ci_state[bit], CI_COMMITTED );
+    }
+    else
+    {
+        // If someone is committing, wait until committed
+        while( sm_atomic_load_acquire( &ci_state[bit] ) == CI_COMMITTING )
+        {
+            //sm_cpu_relax();
+            sm_atomic_yield();
+        }
+    }
+}*/
+
 #endif
 
 void  init_large_malloc();
@@ -305,8 +338,8 @@ enum
 typedef struct per_folio
 {
     SM_ALIGNED( 64 ) struct per_folio* next;
-    struct per_folio* prev;
-    _Atomic uint64_t  inuse_bitmap
+    struct per_folio*   prev;
+    _Atomic( uint64_t ) inuse_bitmap
         [folio_bitmap_n_words];    // up to 512 objects (8 bytes per object) per page.  The bit is set if the object is in use.
 } per_folio;
 

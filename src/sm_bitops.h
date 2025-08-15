@@ -34,7 +34,6 @@ sm_ctz64( uint64_t x )
     return (int) idx;
 }
 
-
 /* clz: undefined if x == 0 */
 static inline int
 sm_clz32( uint32_t x )

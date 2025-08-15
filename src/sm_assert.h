@@ -19,7 +19,7 @@ extern "C"
 {
 #endif
 
-    void sm_assert_internal( const char* predicate, const char* file, unsigned int line, const char* function );
+void sm_assert_internal( const char* predicate, const char* file, unsigned int line, const char* function );
 
 #ifdef __cplusplus
 }
