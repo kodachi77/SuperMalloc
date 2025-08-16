@@ -19,6 +19,49 @@ static void log_command( char command, const void* ptr );
 
 enum
 {
+    // should be enough for now.
+    processor_number_limit = 64
+};
+
+static uint64_t partitioned_footprint[processor_number_limit];
+
+typedef struct processor_id
+{
+    SM_ALIGNED( 64 ) int cpuid;
+    int count;
+} processor_id;
+
+static const int                        prid_cache_time = 128;
+static SM_ATTRIBUTE_THREAD processor_id prid;
+
+static inline void
+check_cpuid( void )
+{
+    if( prid.count++ % prid_cache_time == 0 ) { prid.cpuid = sched_getcpu() % processor_number_limit; }
+}
+
+static void
+add_to_footprint( int64_t delta )
+{
+    check_cpuid();
+    atomic_fetch_add( (_Atomic uint64_t*) &partitioned_footprint[prid.cpuid], delta );
+}
+
+static int64_t
+get_footprint( void )
+{
+    int64_t sum = 0;
+    for( int i = 0; i < processor_number_limit; i++ )
+    {
+        // don't really care if we slightly stale answers.
+        // so no atomic_load
+        sum += partitioned_footprint[i];
+    }
+    return sum;
+}
+
+enum
+{
     n_large_classes = first_huge_bin_number - first_large_bin_number
 };
 
@@ -161,7 +204,7 @@ large_malloc( size_t size )
                 {
                     large_object_list_cell* old_first = *free_head;
                     entry[objects_per_chunk - 1].next = old_first;
-                    if( atomic_compare_and_swap( (atomic_ptr*) free_head, &old_first, &entry[0] ) ) break; //> added &
+                    if( atomic_compare_and_swap( (atomic_ptr*) free_head, &old_first, &entry[0] ) ) break;    //> added &
                 }
             }
 
@@ -227,7 +270,7 @@ large_free( void* p )
         {
             large_object_list_cell* first = atomic_load( (atomic_ptr*) h );
             ei->next                      = first;
-            if( atomic_compare_and_swap( (atomic_ptr*) h, &first, ei ) ) break; //> added &
+            if( atomic_compare_and_swap( (atomic_ptr*) h, &first, ei ) ) break;    //> added &
         }
     }
 }

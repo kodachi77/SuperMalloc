@@ -248,7 +248,7 @@ extern "C"
     init_huge_malloc();
     init_large_malloc();
     init_small_malloc();
-    init_cached_malloc();
+    //>init_cached_malloc();
 }
 
 void
@@ -302,6 +302,39 @@ test_hyperceil( void )
     }
 }
 #endif
+
+void*
+cached_malloc( binnumber_t bin )
+{
+    SM_ASSERT( bin < first_huge_bin_number );
+    uint64_t siz = bin_2_size( bin );
+
+    if( bin < first_large_bin_number )
+    {
+        void* result = small_malloc( bin );
+        return result;
+    }
+    else
+    {
+        void* result = large_malloc( siz );
+        return result;
+    }
+}
+
+void
+cached_free( void* ptr, binnumber_t bin )
+{
+    // What I want:
+    //  If the threadcache is empty enough, add the object to the thread cache, and we are done.
+    //  If the cpucache is empty enough, add everything in one of the threadcaches to the cpucache (including ptr), and we are done.
+    //  Else if the global cache is empty enough, add everything from one of the cpucaches (including the ptr), and we are done.
+    //  Else really free the pointer.
+    SM_ASSERT( bin < first_huge_bin_number );
+    uint64_t siz = bin_2_size( bin );
+
+    if( bin < first_large_bin_number ) { small_free( ptr ); }
+    else { large_free( ptr ); }
+}
 
 static uint64_t max_allocatable_size = ( chunksize << 27 ) - 1;
 

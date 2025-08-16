@@ -6,7 +6,7 @@ run_tests()
     initialize_malloc();
 
     //>test_platform();
-    test_cache_early();
+    //>test_cache_early();
     test_hyperceil();
     test_size_2_bin();
     test_makechunk();

@@ -42,7 +42,7 @@ SM_DECLARE_ATOMIC_OPERATION( __get_from_free_chunks, pre_get_from_free_chunks, d
 static void*
 get_cached_power_of_two_chunks( int list_number )
 {
-    if( atomic_load( (volatile  _Atomic(uint32_t)*) &free_chunks[list_number] ) == 0 ) return NULL;
+    if( atomic_load( (volatile _Atomic( uint32_t )*) &free_chunks[list_number] ) == 0 ) return NULL;
     return SM_INVOKE_ATOMIC_OPERATION( &huge_lock, __get_from_free_chunks, list_number );
 }
 
@@ -60,10 +60,11 @@ put_cached_power_of_two_chunks( chunknumber_t cn, int list_number )
         commit_ci_page_as_needed( cn );
         while( 1 )
         {
-            chunknumber_t hd = atomic_load( (volatile  _Atomic(uint32_t)*) &free_chunks[list_number] );
+            chunknumber_t hd = atomic_load( (volatile _Atomic( uint32_t )*) &free_chunks[list_number] );
             //commit_ci_page_as_needed( cn );
             chunk_infos[cn].next = hd;
-            if( atomic_compare_and_swap( (volatile  _Atomic( uint32_t )*) &free_chunks[list_number], &hd, cn ) ) break; //> added &
+            if( atomic_compare_and_swap( (volatile _Atomic( uint32_t )*) &free_chunks[list_number], &hd, cn ) )
+                break;    //> added &
         }
     }
 }

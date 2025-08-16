@@ -257,8 +257,8 @@ void  init_large_malloc();
 void* large_malloc( size_t size );
 void  large_free( void* ptr );
 
-void    add_to_footprint( int64_t delta );
-int64_t get_footprint();
+//void    add_to_footprint( int64_t delta );
+//int64_t get_footprint();
 
 void  init_small_malloc();
 void* small_malloc( binnumber_t bin );
