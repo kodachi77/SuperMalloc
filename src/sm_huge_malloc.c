@@ -20,14 +20,6 @@ static lock_t huge_lock = SM_LOCK_INITIALIZER;
 // terminated by 0.
 chunknumber_t free_chunks[log_max_chunknumber];
 
-static void
-pre_get_from_free_chunks( int f )
-{
-    int r = free_chunks[f];
-    if( r == 0 ) return;
-    prefetch_write( &free_chunks[f] );
-    prefetch_read( &chunk_infos[r] );
-}
 static void*
 do_get_from_free_chunks( int f )
 {
@@ -37,7 +29,7 @@ do_get_from_free_chunks( int f )
     return (void*) ( (uint64_t) r * chunksize );
 }
 
-SM_DECLARE_ATOMIC_OPERATION( __get_from_free_chunks, pre_get_from_free_chunks, do_get_from_free_chunks, void*, int );
+SM_DECLARE_ATOMIC_OPERATION( __get_from_free_chunks, do_get_from_free_chunks, void*, int );
 
 static void*
 get_cached_power_of_two_chunks( int list_number )

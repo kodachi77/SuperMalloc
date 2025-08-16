@@ -123,13 +123,6 @@ _beginthread( VoidFunction x, int, void* z )
 }
 #endif
 
-#if 0
-static char buf[65536];
-
-#define malloc( v ) &buf
-#define free( p )
-#endif
-
 //#undef CPP
 //#define CPP
 //#include "arch-specific.h"
@@ -154,22 +147,6 @@ void
 operator delete[]( void* pUserData )
 {
     theFastHeap.Delete( pUserData );
-}
-#endif
-
-#if 0
-extern "C" void * hdmalloc (size_t sz) ;
-extern "C" void hdfree (void * ptr) ;
-extern "C" void hdmalloc_stats (void) ;
-void * operator new( unsigned int cb )
-{
-  void *pRet = hdmalloc((size_t)cb) ;
-  return pRet;
-}
-
-void operator delete[](void *pUserData )
-{
-  hdfree(pUserData) ;
 }
 #endif
 
@@ -286,22 +263,6 @@ main( int argc, char* argv[] )
     // Activate 'Low Fragmentation Heap'.
     ULONG info = 2;
     HeapSetInformation( GetProcessHeap(), HeapCompatibilityInformation, &info, sizeof( info ) );
-#endif
-#if 0    // defined(__SVR4)
- {
-   psinfo_t ps;
-   int pid = getpid();
-   char fname[255];
-   sprintf (fname, "/proc/%d/psinfo", pid);
-   // sprintf (fname, "/proc/self/ps");
-   FILE * f = fopen (fname, "rb");
-   printf ("opening %s\n", fname);
-   if (f) {
-     fread (&ps, sizeof(ps), 1, f);
-     printf ("resident set size = %dK\n", ps.pr_rssize);
-     fclose (f);
-   }
- }
 #endif
 
     //  char * dummy = new char[42];
@@ -649,15 +610,6 @@ runthreads( long sleep_cnt, int min_threads, int max_threads, int chperthread, i
         double throughput = (double) sum_allocs / duration;
         double rtime      = 1.0e9 / throughput;
         printf( "Throughput = %8.0f operations per second, relative time: %.3fs.\n", throughput, rtime );
-
-#if 0
-      printf("%2d ", num_threads ) ;
-      printf("%6.3f", duration  ) ;
-      printf("%6.3f", rate_n/rate_1 ) ;
-      printf("%8.0f", sum_allocs/duration ) ;
-      printf(" %6.3f %.3f", (double)used_space/(1024*1024), used_space/reqd_space) ;
-      printf("\n") ;
-#endif
 
         Sleep( 2500L );    // wait 2.5 sec for old threads to die
 

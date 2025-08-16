@@ -11,12 +11,6 @@
 #include "sm_assert.h"
 #include "sm_internal.h"
 
-#ifdef ENABLE_LOG_CHECKING
-static void log_command( char command, const void* ptr );
-#else
-#define log_command( a, b ) ( (void) 0 )
-#endif
-
 enum
 {
     // should be enough for now.
@@ -72,21 +66,6 @@ static large_object_list_cell* free_large_objects
 static lock_t large_lock = SM_LOCK_INITIALIZER;
 
 large_object_list_cell*
-predo_large_malloc_pop( large_object_list_cell** free_head )
-{
-    // For the predo, we basically want to look at the free head (and make it writeable) and
-    // read the next pointer (but only if the free-head is non-null, since the free-head could
-    // have become null by now, and we would need to allocate another chunk.)
-    large_object_list_cell* h = *free_head;
-    if( h != NULL )
-    {
-        prefetch_write( free_head );
-        prefetch_read( h );
-    }
-    return NULL;
-}
-
-large_object_list_cell*
 do_large_malloc_pop( large_object_list_cell** free_head )
 {
     large_object_list_cell* h = *free_head;
@@ -99,7 +78,7 @@ do_large_malloc_pop( large_object_list_cell** free_head )
     }
 }
 
-SM_DECLARE_ATOMIC_OPERATION( large_malloc_pop, predo_large_malloc_pop, do_large_malloc_pop, large_object_list_cell*,
+SM_DECLARE_ATOMIC_OPERATION( large_malloc_pop, do_large_malloc_pop, large_object_list_cell*,
                              large_object_list_cell** );
 
 void
@@ -164,7 +143,6 @@ large_malloc( size_t size )
             SM_ASSERT( address_2_chunknumber( address ) == address_2_chunknumber( chunk ) );
             SM_LOG_DEBUG( "result=%p\n", address );
             SM_ASSERT( bin_from_bin_and_size( chunk_infos[address_2_chunknumber( address )].bin_and_size ) == b );
-            log_command( 'a', address );
             return address;
         }
         else
@@ -237,7 +215,6 @@ large_footprint( void* p )
 void
 large_free( void* p )
 {
-    log_command( 'f', p );
     bin_and_size_t b_and_s = chunk_infos[address_2_chunknumber( p )].bin_and_size;
     SM_ASSERT( b_and_s != 0 );
     binnumber_t bin = bin_from_bin_and_size( b_and_s );
@@ -365,31 +342,3 @@ test_large_malloc( void )
     SM_ASSERT( get_footprint() - fp == 0 );
 }
 
-#ifdef ENABLE_LOG_CHECKING
-static const int log_count_limit = 10000000;
-static int       log_count       = 0;
-static struct logentry
-{
-    char        command;
-    const void* ptr;
-} log[log_count_limit];
-
-static void
-log_command( char command, const void* ptr )
-{
-    int i = atomic_fetch_add( &log_count, 1 );
-    if( i < log_count_limit )
-    {
-        log[i].command = command;
-        log[i].ptr     = ptr;
-    }
-    if( i == log_count_limit ) { printf( "Log overflowed, I dealt with that by truncating the log\n" ); }
-}
-
-void
-check_log_large()
-{
-    printf( "llog\n" );
-    for( int i = 0; i < log_count; i++ ) { printf( "%c %p\n", log[i].command, log[i].ptr ); }
-}
-#endif

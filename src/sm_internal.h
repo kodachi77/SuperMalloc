@@ -201,14 +201,14 @@ extern chunk_info*      chunk_infos;
 static inline int
 check_ci_bit( uint32_t k )
 {
-    uint32_t bits = atomic_load( (atomic_ptr*) &ci_bitfields[k / 32] );
+    uint32_t bits = atomic_load( (_Atomic(uint32_t)*) &ci_bitfields[k / 32] );
     return ( ( bits & ( 1 << ( k % 32 ) ) ) != 0 );
 }
 
 static inline void
 set_ci_bit( uint32_t k )
 {
-    atomic_fetch_or( (atomic_ptr*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
+    atomic_fetch_or( (_Atomic(uint32_t)*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
 }
 
 static inline void
@@ -264,10 +264,9 @@ void  init_small_malloc();
 void* small_malloc( binnumber_t bin );
 void  small_free( void* ptr );
 
-extern bool use_threadcache;
-void        init_cached_malloc();
-void*       cached_malloc( binnumber_t bin );
-void        cached_free( void* ptr, binnumber_t bin );
+void  init_cached_malloc();
+void* cached_malloc( binnumber_t bin );
+void  cached_free( void* ptr, binnumber_t bin );
 
 enum
 {
@@ -277,38 +276,6 @@ enum
     thread_cache_bytecount_limit  = 2 * 4096
 
 };
-
-#ifdef ENABLE_STATS
-void print_cache_stats();
-
-void print_bin_stats();
-void bin_stats_note_malloc( binnumber_t b );
-void bin_stats_note_free( binnumber_t b );
-
-#else
-static inline void
-print_cache_stats()
-{
-}
-
-static inline void
-print_bin_stats()
-{
-}
-
-static inline void
-bin_stats_note_malloc( binnumber_t b )
-{
-    (void) b;
-}
-
-static inline void
-bin_stats_note_free( binnumber_t b )
-{
-    (void) b;
-}
-
-#endif
 
 #ifdef TESTING
 #define IS_TESTING 1

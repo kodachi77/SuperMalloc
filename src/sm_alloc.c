@@ -98,58 +98,6 @@ enum
 _Atomic( uint32_t ) ci_bitfields[n_elts / 32] = { 0 };
 uint32_t            n_cores;
 
-#ifdef ENABLE_FAILED_COUNTS
-atomic_stats_s atomic_stats;
-
-lock_t                 SM_LOCK_INITIALIZER( failed_counts_mutex );
-int                    failed_counts_n = 0;
-struct failed_counts_s failed_counts[max_failed_counts];
-
-int
-compare_failed_counts( const void* a_v, const void* b_v )
-{
-    const failed_counts_s* a = reinterpret_cast<const failed_counts_s*>( a_v );
-    const failed_counts_s* b = reinterpret_cast<const failed_counts_s*>( b_v );
-    int                    r = strcmp( a->name, b->name );
-    if( r != 0 ) return r;
-    if( a->code < b->code ) return -1;
-    if( a->code > b->code ) return +1;
-    return 0;
-}
-#endif
-
-#if 0
-static void print_atomic_stats() {
-#if defined( ENABLE_FAILED_COUNTS ) && defined( TESTING )
-  fprintf(stderr, "Critical sections: %ld, locked %ld\n", atomic_stats.atomic_count, atomic_stats.locked_count);
-  qsort(failed_counts, failed_counts_n, sizeof(failed_counts[0]), compare_failed_counts);
-  for (int i = 0; i < failed_counts_n; i++) {
-    fprintf(stderr, " %38s: 0x%08x %5ld\n", failed_counts[i].name, failed_counts[i].code, failed_counts[i].count);
-  }
-#endif
-}
-#endif
-
-#ifdef ENABLE_STATS
-static void
-print_stats()
-{
-    print_cache_stats();
-    print_bin_stats();
-}
-#endif
-
-#ifdef ENABLE_LOG_CHECKING
-static void
-check_log()
-{
-    check_log_large();
-}
-#endif
-
-bool do_predo        = false;
-bool use_threadcache = true;
-
 static void ( *free_p )( void* );
 
 static bool
@@ -194,14 +142,6 @@ extern "C"
     // initialized.  (Which makes sense if the libraries have
     // initializers that malloc: they aren't yet initialized...)
 
-    //  atexit(print_atomic_stats);
-    //#ifdef ENABLE_STATS
-    //  atexit(print_stats);
-    //#endif
-    //#ifdef ENABLE_LOG_CHECKING
-    //  atexit(check_log);
-    //#endif
-
     if( !__SetLockPagesPrivilege() )
     {
         // TODO: write error message.
@@ -221,30 +161,11 @@ extern "C"
     n_cores = cpucores();
 
 #if defined( __linux__ )
-    {
-        char* v = getenv( "SUPERMALLOC_PREDO" );
-        if( v )
-        {
-            if( strcmp( v, "0" ) == 0 ) { do_predo = false; }
-            else if( strcmp( v, "1" ) == 0 ) { do_predo = true; }
-        }
-    }
-    {
-        char* v = getenv( "SUPERMALLOC_THREADCACHE" );
-        if( v )
-        {
-            if( strcmp( v, "0" ) == 0 ) { use_threadcache = false; }
-            else if( strcmp( v, "1" ) == 0 ) { use_threadcache = true; }
-        }
-    }
-
     free_p = ( void ( * )( void* ) )( dlsym( RTLD_NEXT, "free" ) );
 #elif defined( _WIN64 )
     // do nothing
 #endif
-#ifdef ENABLE_FAILED_COUNTS
-    initialize_lock_array( &failed_counts_mutex, 1 );
-#endif
+
     init_huge_malloc();
     init_large_malloc();
     init_small_malloc();

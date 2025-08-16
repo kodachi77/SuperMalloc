@@ -9,46 +9,6 @@
 #include "sm_internal.h"
 #include "sm_platform.h"
 
-#ifdef ENABLE_STATS
-
-struct bin_stats
-{
-    uint64_t n_mallocs, net_n_mallocs, highwater_mark;
-};
-
-static struct stats
-{
-    bin_stats b[first_huge_bin_number + 1];    // the last one is all the huge bin stats
-} stats;
-
-void
-bin_stats_note_malloc( binnumber_t b )
-{
-    b = min( first_huge_bin_number, b );
-    atomic_fetch_add( &stats.b[b].n_mallocs, 1 );
-    uint64_t net = atomic_fetch_add( &stats.b[b].net_n_mallocs, 1 );
-    fetch_and_max( &stats.b[b].highwater_mark, net );
-}
-
-void
-bin_stats_note_free( binnumber_t b )
-{
-    b = min( first_huge_bin_number, b );
-    atomic_fetch_add( &stats.b[b].net_n_mallocs, -1 );
-}
-
-void
-print_bin_stats()
-{
-    printf( "bin: n_mallocs net_n_mallocs highwater\n" );
-    for( binnumber_t i = 0; i <= first_huge_bin_number; i++ )
-    {
-        printf( "%d: %lu %lu %lu\n", i, stats.b[i].n_mallocs, stats.b[i].net_n_mallocs, stats.b[i].highwater_mark );
-    }
-}
-
-#endif
-
 static lock_t small_locks[first_large_bin_number] = { REPEAT_FOR_SMALL_BINS( SM_LOCK_INITIALIZER ) };
 
 typedef struct DynamicSmallBinInfo
@@ -143,16 +103,6 @@ verify_small_invariants()
     }
 }
 
-static void
-predo_small_malloc_add_pages_from_new_chunk( binnumber_t bin, uint32_t dsbi_offset, small_chunk_header* sch )
-{
-    folios_per_chunk_t  folios_per_chunk = static_bin_info[bin].folios_per_chunk;
-    objects_per_folio_t o_per_folio      = static_bin_info[bin].objects_per_folio;
-    prefetch_write( &dsbi.lists.b[dsbi_offset + o_per_folio + 1] );
-    prefetch_write( &sch->ll[folios_per_chunk - 1].next );
-    if( dsbi.fullest_offset[bin] == 0 ) { prefetch_write( &dsbi.fullest_offset[bin] ); }
-}
-
 static bool
 do_small_malloc_add_pages_from_new_chunk( binnumber_t bin, uint32_t dsbi_offset, small_chunk_header* sch )
 {
@@ -172,61 +122,9 @@ do_small_malloc_add_pages_from_new_chunk( binnumber_t bin, uint32_t dsbi_offset,
     return true;    // cannot have the return type with void, since atomically wants to store the return type and then return it.
 }
 
-SM_DECLARE_ATOMIC_OPERATION( small_malloc_add_pages_from_new_chunk, predo_small_malloc_add_pages_from_new_chunk,
+SM_DECLARE_ATOMIC_OPERATION( small_malloc_add_pages_from_new_chunk, 
                              do_small_malloc_add_pages_from_new_chunk, bool, binnumber_t, uint32_t, small_chunk_header* );
 
-static void
-predo_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
-{
-    (void) o_size;
-
-    uint32_t fullest = atomic_load( &dsbi.fullest_offset[bin] );
-    if( fullest == 0 ) return;    // A chunk must be allocated.
-    uint16_t   o_per_folio  = static_bin_info[bin].objects_per_folio;
-    uint32_t   fetch_offset = fullest;
-    per_folio* result_pp    = atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + fetch_offset] );
-    if( result_pp == NULL )
-    {
-        if( fullest == o_per_folio )
-        {
-            fetch_offset++;
-            result_pp = atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + fetch_offset] );
-        }
-        if( result_pp == NULL )
-        {
-            return;    // Can happen only because predo isn't done atomically.
-        }
-    }
-    prefetch_write( &dsbi.lists.b[dsbi_offset + fetch_offset] );    // previously fetched, so just make it writeable
-
-    per_folio* next = result_pp->next;
-    if( next ) { load_and_prefetch_write( (atomic_ptr*) &next->prev ); }
-    per_folio* old_h_below = atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + fullest - 1] );
-    prefetch_write( &dsbi.lists.b[dsbi_offset + fullest - 1] );    // previously fetched
-    if( old_h_below ) { load_and_prefetch_write( (atomic_ptr*) &old_h_below->prev ); }
-
-    // set the new fullest
-    prefetch_write( &dsbi.fullest_offset[bin] );    // previously fetched
-
-    if( fullest <= 1 )
-    {
-        for( uint32_t new_fullest = 1; new_fullest <= o_per_folio; new_fullest++ )
-        {
-            if( atomic_load( (atomic_ptr*) &dsbi.lists.b[dsbi_offset + new_fullest] ) ) { break; }
-        }
-    }
-
-    // prefetch the bitmap
-    for( uint32_t w = 0; w < ceil32( o_per_folio, 64 ); w++ )
-    {
-        uint64_t bw = atomic_load( &result_pp->inuse_bitmap[w] );
-        if( bw != UINT64_MAX )
-        {
-            prefetch_write( &result_pp->inuse_bitmap[w] );
-            break;
-        }
-    }
-}
 
 static void*
 do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
@@ -313,7 +211,7 @@ do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
     abort();    // It's bad if we get here, it means that there was no bit in the bitmap, but the data structure said there should be.
 }
 
-SM_DECLARE_ATOMIC_OPERATION( __small_malloc, predo_small_malloc, do_small_malloc, void*, binnumber_t, uint32_t, uint32_t );
+SM_DECLARE_ATOMIC_OPERATION( __small_malloc, do_small_malloc, void*, binnumber_t, uint32_t, uint32_t );
 
 //#define MICROTIMING
 
@@ -352,7 +250,6 @@ small_malloc( binnumber_t bin )
 {
     WHEN_MICROTIMING( uint64_t start_small_malloc = rdtsc() );
     verify_small_invariants();
-    bin_stats_note_malloc( bin );
     //size_t usable_size = bin_2_size(bin);
     SM_ASSERT( bin < first_large_bin_number );
     uint32_t            dsbi_offset      = dynamic_small_bin_offset( bin );
@@ -462,40 +359,6 @@ extern "C"
 }
 #endif    // !defined NOCPPRUNTIME
 
-static void
-predo_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_offset )
-{
-    uint16_t o_per_folio = static_bin_info[bin].objects_per_folio;
-    uint32_t old_count   = 0;
-    uint32_t imax        = ceil32( static_bin_info[bin].objects_per_folio, 64 );
-    for( uint32_t i = 0; i < imax; i++ ) old_count += SM_BUILTIN_POPCOUNT64( atomic_load( &pp->inuse_bitmap[i] ) );
-    // prefetch for clearing the bit.  We know it was just loaded, so we don't have to load it again.
-    SM_ASSERT( objnum / 64 < imax );
-    prefetch_write( &pp->inuse_bitmap[objnum / 64] );
-
-    uint32_t old_offset_within = o_per_folio - old_count;
-    uint32_t old_offset_dsbi   = dsbi_offset + old_offset_within;
-    uint32_t new_offset        = old_offset_dsbi + 1;
-
-    per_folio* pp_next = atomic_load( (atomic_ptr*) &pp->next );
-    per_folio* pp_prev = atomic_load( (atomic_ptr*) &pp->prev );
-
-    prefetch_write( &pp->next );
-    prefetch_write( &pp->prev );
-    if( pp_prev == NULL ) { load_and_prefetch_write( (atomic_ptr*) &dsbi.lists.b[old_offset_dsbi] ); }
-    else { load_and_prefetch_write( (atomic_ptr*) &pp_prev->next ); }
-    if( pp_next != NULL ) { load_and_prefetch_write( (atomic_ptr*) &pp_next->prev ); }
-    // prefetch for fixing up the count
-    uint32_t fullest_off = atomic_load( (atomic_ptr*) &dsbi.fullest_offset[bin] );
-    if( old_offset_within == 0 || ( pp_next == NULL && fullest_off == old_offset_within ) )
-    {
-        prefetch_write( &dsbi.fullest_offset[bin] );
-    }
-    per_folio* new_next = atomic_load( (atomic_ptr*) &dsbi.lists.b[new_offset] );
-    if( new_next ) { load_and_prefetch_write( (atomic_ptr*) &new_next->prev ); }
-    prefetch_write( &dsbi.lists.b[new_offset] );
-}
-
 static per_folio*
 do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_offset )
 // Effect: Free the object specified by objnum and pp (that is the
@@ -555,18 +418,8 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     }
 }
 
-SM_DECLARE_ATOMIC_OPERATION( __small_free, predo_small_free, do_small_free, per_folio*, binnumber_t, per_folio*, uint64_t,
+SM_DECLARE_ATOMIC_OPERATION( __small_free, do_small_free, per_folio*, binnumber_t, per_folio*, uint64_t,
                              uint32_t );
-
-void
-predo_small_free_post_madvise( per_folio* pp, uint32_t total_dsbi_offset )
-{
-    per_folio* new_next = atomic_load( (atomic_ptr*) &dsbi.lists.b[total_dsbi_offset] );
-    prefetch_write( &pp->prev );
-    prefetch_write( &pp->next );
-    if( new_next ) { load_and_prefetch_write( (atomic_ptr*) &new_next->prev ); }
-    prefetch_write( &dsbi.lists.b[total_dsbi_offset] );
-}
 
 bool
 small_free_post_madvise( per_folio* pp, uint32_t total_dsbi_offset )
@@ -583,7 +436,7 @@ small_free_post_madvise( per_folio* pp, uint32_t total_dsbi_offset )
     return true;    // cannot return void from a templated function.
 }
 
-SM_DECLARE_ATOMIC_OPERATION( __small_free_post_madvise, predo_small_free_post_madvise, small_free_post_madvise, bool, per_folio*,
+SM_DECLARE_ATOMIC_OPERATION( __small_free_post_madvise, small_free_post_madvise, bool, per_folio*,
                              uint32_t );
 
 void
@@ -631,7 +484,6 @@ small_free( void* p )
         SM_INVOKE_ATOMIC_OPERATION( &small_locks[bin], __small_free_post_madvise, pp,
                                     dsbi_offset + static_bin_info[bin].objects_per_folio + 1 );
     }
-    bin_stats_note_free( bin );
     verify_small_invariants();
 }
 

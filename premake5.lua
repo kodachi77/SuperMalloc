@@ -109,15 +109,6 @@ project "supermalloc_test"
     files { "src/*.c", "src/*.h", "src/generated_constants.cxx", "src/generated_constants.hxx" }
     excludes { "src/objsizes.c" }
     defines { "TESTING" }
-    if _OPTIONS["enable-log-check"] then
-        defines { "ENABLE_LOG_CHECKING" }
-    end
-    if _OPTIONS["enable-stats"] then
-        defines { "ENABLE_STATS" }
-    end
-    if _OPTIONS["enable-failed-counts"] then
-        defines { "ENABLE_FAILED_COUNTS" }
-    end
     if _OPTIONS["coverage"] then
         filter { "system:linux" }
             buildoptions { "-fprofile-arcs -ftest-coverage" }
