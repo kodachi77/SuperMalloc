@@ -1,5 +1,6 @@
-group "default" {
-  targets = ["gcc9", "clang11", "gcc-modern", "clang-modern"]
+variable "HOST_OS" {
+  # default if caller doesn't export HOST_OS
+  default = "linux"
 }
 
 target "gcc9" {
@@ -24,4 +25,14 @@ target "clang-modern" {
   dockerfile = "Dockerfile.linux"
   target     = "clang-modern"
   tags       = ["toolchain:clang-modern"]
+}
+
+target "msvc-clang-cl" {
+  dockerfile = "Dockerfile.windows"
+  target     = "msvc-clang-cl"
+  tags       = ["toolchain:msvc-clang-cl"]
+}
+
+group "default" {
+  targets = HOST_OS == "windows" ? ["msvc-clang-cl"] : ["gcc9", "clang11", "gcc-modern", "clang-modern"]
 }
