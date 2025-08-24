@@ -26,21 +26,6 @@ premake.override(premake.vstudio.vc2010, "buildEvents", function(base, cfg)
 end)
 
 newoption {
-    trigger = "enable-log-check",
-    description = "Enable log checking."
-}
-
-newoption {
-    trigger = "enable-stats",
-    description = "Enable statistics."
-}
-
-newoption {
-    trigger = "enable-failed-counts",
-    description = "Enable counting failed shared resource acquisitions."
-}
-
-newoption {
     trigger = "coverage",
     description = "Create code coverage report."
 }

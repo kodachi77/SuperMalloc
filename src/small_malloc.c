@@ -122,9 +122,8 @@ do_small_malloc_add_pages_from_new_chunk( binnumber_t bin, uint32_t dsbi_offset,
     return true;    // cannot have the return type with void, since atomically wants to store the return type and then return it.
 }
 
-SM_DECLARE_ATOMIC_OPERATION( small_malloc_add_pages_from_new_chunk, 
-                             do_small_malloc_add_pages_from_new_chunk, bool, binnumber_t, uint32_t, small_chunk_header* );
-
+SM_DECLARE_ATOMIC_OPERATION( small_malloc_add_pages_from_new_chunk, do_small_malloc_add_pages_from_new_chunk, bool, binnumber_t,
+                             uint32_t, small_chunk_header* );
 
 static void*
 do_small_malloc( binnumber_t bin, uint32_t dsbi_offset, uint32_t o_size )
@@ -418,8 +417,7 @@ do_small_free( binnumber_t bin, per_folio* pp, uint64_t objnum, uint32_t dsbi_of
     }
 }
 
-SM_DECLARE_ATOMIC_OPERATION( __small_free, do_small_free, per_folio*, binnumber_t, per_folio*, uint64_t,
-                             uint32_t );
+SM_DECLARE_ATOMIC_OPERATION( __small_free, do_small_free, per_folio*, binnumber_t, per_folio*, uint64_t, uint32_t );
 
 bool
 small_free_post_madvise( per_folio* pp, uint32_t total_dsbi_offset )
@@ -436,8 +434,7 @@ small_free_post_madvise( per_folio* pp, uint32_t total_dsbi_offset )
     return true;    // cannot return void from a templated function.
 }
 
-SM_DECLARE_ATOMIC_OPERATION( __small_free_post_madvise, small_free_post_madvise, bool, per_folio*,
-                             uint32_t );
+SM_DECLARE_ATOMIC_OPERATION( __small_free_post_madvise, small_free_post_madvise, bool, per_folio*, uint32_t );
 
 void
 small_free( void* p )

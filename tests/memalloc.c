@@ -47,10 +47,10 @@ enable_lock_pages_privilege( void )
     {
         DWORD err = print_last_error( "AdjustTokenPrivileges failed" );
         CloseHandle( hToken );
-        if (err == ERROR_NOT_ALL_ASSIGNED) {
-             fprintf(stderr,
-                "This account does not have SeLockMemoryPrivilege assigned.\n"
-                "Grant 'Lock pages in memory' to this user, then sign out/in.\n");
+        if( err == ERROR_NOT_ALL_ASSIGNED )
+        {
+            fprintf( stderr, "This account does not have SeLockMemoryPrivilege assigned.\n"
+                             "Grant 'Lock pages in memory' to this user, then sign out/in.\n" );
         }
 
         return FALSE;

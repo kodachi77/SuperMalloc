@@ -1,0 +1,71 @@
+# -------- Premake fetcher (shared by all stages) -----------------------------
+ARG PREMAKE_URL=https://github.com/premake/premake-core/archive/refs/tags/v5.0.0-beta7.tar.gz
+FROM gcc:9-bullseye AS premake
+RUN apt-get -qq update; \
+    apt-get install -qqy --no-install-recommends \
+        ca-certificates wget tar && \
+    rm -rf /var/lib/apt/lists/*
+ARG PREMAKE_URL
+RUN wget -qO /tmp/premake.tgz "$PREMAKE_URL" && \
+    mkdir -p /tmp/premake && \
+    tar -C /tmp/premake -xzf /tmp/premake.tgz && \
+    cd /tmp/premake/premake-core-5.0.0-beta7 && \
+    make -f Bootstrap.mak linux -j$(nproc) && \
+    cp bin/release/premake5 /usr/local/bin/premake5 && \
+    rm /tmp/premake.tgz && \
+    rm -rf /tmp/premake && \
+    /usr/local/bin/premake5 --version
+
+# -------- GCC 9 --------------------------------------------------------------
+FROM gcc:9-bullseye AS gcc9
+RUN apt-get -qq update; \
+    apt-get install -qqy --no-install-recommends \
+        ca-certificates autoconf automake cmake make patch git && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=premake /usr/local/bin/premake5 /usr/local/bin/premake5
+ENV CC=gcc CXX=g++
+CMD ["bash"]
+
+# -------- Modern GCC ---------------------------------------------------------
+FROM gcc:14-trixie AS gcc-modern
+RUN apt-get -qq update; \
+    apt-get install -qqy --no-install-recommends \
+        ca-certificates autoconf automake cmake make patch git && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=premake /usr/local/bin/premake5 /usr/local/bin/premake5
+ENV CC=gcc CXX=g++
+CMD ["bash"]
+
+# -------- Clang 11 -----------------------------------------------------------
+FROM silkeh/clang:11-bullseye AS clang11
+RUN apt-get -qq update && \
+    apt-get install -qqy --no-install-recommends \
+        ca-certificates autoconf automake cmake make patch git lld && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=premake /usr/local/bin/premake5 /usr/local/bin/premake5
+ENV CC=clang CXX=clang++
+CMD ["bash"]
+
+
+# -------- Modern Clang -------------------------------------------------------
+FROM debian:trixie-slim AS clang-modern
+RUN apt-get -qq update; \
+    apt-get install -qqy --no-install-recommends \
+        gnupg2 wget ca-certificates \
+        autoconf automake cmake make patch git && \
+    rm -rf /var/lib/apt/lists/*      
+
+RUN echo "deb https://apt.llvm.org/trixie llvm-toolchain-trixie-21 main\n" \
+        > /etc/apt/sources.list.d/llvm.list && \
+    wget -qO /etc/apt/trusted.gpg.d/llvm.asc \
+        https://apt.llvm.org/llvm-snapshot.gpg.key && \
+    apt-get -qq update; \
+    apt-get install -qqy -t llvm-toolchain-trixie-21 clang-21 clang-tidy-21 \
+        clang-format-21 libc++-dev libc++abi-dev lld-21 && \
+    for f in /usr/lib/llvm-*/bin/*; do ln -sf "$f" /usr/bin; done && \
+    ln -sf clang /usr/bin/cc && \
+    ln -sf clang++ /usr/bin/c++
+
+COPY --from=premake /usr/local/bin/premake5 /usr/local/bin/premake5
+ENV CC=clang CXX=clang++
+CMD ["bash"]

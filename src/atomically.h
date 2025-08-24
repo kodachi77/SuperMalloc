@@ -94,24 +94,24 @@ sm_unlock( lock_t* mylock )
 #define _DEFINE_ARG( type, n ) type a##n
 #define _INVOKE_ARG( type, n ) a##n
 
-#define SM_DECLARE_ATOMIC_OPERATION( atomic_name, fun, ret_type, ... )                                                        \
-    ret_type atomic_name( lock_t* mylock, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                                     \
-    {                                                                                                                                \
-        sm_lock( mylock );                                                                                                           \
-        ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                                    \
-        sm_unlock( mylock );                                                                                                         \
-        return r;                                                                                                                    \
+#define SM_DECLARE_ATOMIC_OPERATION( atomic_name, fun, ret_type, ... )                                                           \
+    ret_type atomic_name( lock_t* mylock, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                                 \
+    {                                                                                                                            \
+        sm_lock( mylock );                                                                                                       \
+        ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                                \
+        sm_unlock( mylock );                                                                                                     \
+        return r;                                                                                                                \
     }
 
-#define SM_DECLARE_ATOMIC_OPERATION2( atomic_name, fun, ret_type, ... )                                                       \
-    ret_type atomic_name( lock_t* mylock1, lock_t* mylock2, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )                   \
-    {                                                                                                                                \
-        sm_lock( mylock1 );                                                                                                          \
-        sm_lock( mylock2 );                                                                                                          \
-        ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                                    \
-        sm_unlock( mylock2 );                                                                                                        \
-        sm_unlock( mylock1 );                                                                                                        \
-        return r;                                                                                                                    \
+#define SM_DECLARE_ATOMIC_OPERATION2( atomic_name, fun, ret_type, ... )                                                          \
+    ret_type atomic_name( lock_t* mylock1, lock_t* mylock2, SM_CALL_MACRO_FOR_EACH( _DEFINE_ARG, ##__VA_ARGS__ ) )               \
+    {                                                                                                                            \
+        sm_lock( mylock1 );                                                                                                      \
+        sm_lock( mylock2 );                                                                                                      \
+        ret_type r = fun( SM_CALL_MACRO_FOR_EACH( _INVOKE_ARG, ##__VA_ARGS__ ) );                                                \
+        sm_unlock( mylock2 );                                                                                                    \
+        sm_unlock( mylock1 );                                                                                                    \
+        return r;                                                                                                                \
     }
 
 #define SM_INVOKE_ATOMIC_OPERATION( mylock, atomic_name, ... )            atomic_name( mylock, ##__VA_ARGS__ )

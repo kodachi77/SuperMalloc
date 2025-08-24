@@ -43,6 +43,9 @@ enum
     cachelines_per_page = pagesize / cacheline_size
 };
 
+_Static_assert( ( cacheline_size & ( cacheline_size - 1 ) ) == 0, "cacheline_size must be power-of-two" );
+_Static_assert( chunksize % pagesize == 0, "chunksize must be power-of-two" );
+
 // We exploit the fact that these are the same size in chunk_infos, which is a union of these two types.
 typedef uint32_t chunknumber_t;
 typedef uint32_t bin_and_size_t;    // we encode the bin number as 7 bits low-order bits.  The size is encoded as
@@ -201,14 +204,14 @@ extern chunk_info*      chunk_infos;
 static inline int
 check_ci_bit( uint32_t k )
 {
-    uint32_t bits = atomic_load( (_Atomic(uint32_t)*) &ci_bitfields[k / 32] );
+    uint32_t bits = atomic_load( (_Atomic( uint32_t )*) &ci_bitfields[k / 32] );
     return ( ( bits & ( 1 << ( k % 32 ) ) ) != 0 );
 }
 
 static inline void
 set_ci_bit( uint32_t k )
 {
-    atomic_fetch_or( (_Atomic(uint32_t)*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
+    atomic_fetch_or( (_Atomic( uint32_t )*) &ci_bitfields[k / 32], 1 << ( k % 32 ) );
 }
 
 static inline void
@@ -264,27 +267,23 @@ void  init_small_malloc();
 void* small_malloc( binnumber_t bin );
 void  small_free( void* ptr );
 
-void  init_cached_malloc();
-void* cached_malloc( binnumber_t bin );
-void  cached_free( void* ptr, binnumber_t bin );
+//void  init_cached_malloc();
+//void* cached_malloc( binnumber_t bin );
+//void  cached_free( void* ptr, binnumber_t bin );
 
-enum
-{
-    cpulimit                      = 128,
-    global_cache_depth            = 8,
-    per_cpu_cache_bytecount_limit = 1024 * 1024,
-    thread_cache_bytecount_limit  = 2 * 4096
+// enum
+// {
+//     cpulimit                      = 64, // no numa
+//     global_cache_depth            = 8,
+//     per_cpu_cache_bytecount_limit = 1024 * 1024,
+//     thread_cache_bytecount_limit  = 2 * 4096
 
-};
+// };
 
 #ifdef TESTING
 #define IS_TESTING 1
 #else
 #define IS_TESTING 0
-#endif
-
-#ifdef ENABLE_LOG_CHECKING
-void check_log_large();
 #endif
 
 typedef struct large_object_list_cell

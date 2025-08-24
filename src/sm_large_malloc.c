@@ -78,8 +78,7 @@ do_large_malloc_pop( large_object_list_cell** free_head )
     }
 }
 
-SM_DECLARE_ATOMIC_OPERATION( large_malloc_pop, do_large_malloc_pop, large_object_list_cell*,
-                             large_object_list_cell** );
+SM_DECLARE_ATOMIC_OPERATION( large_malloc_pop, do_large_malloc_pop, large_object_list_cell*, large_object_list_cell** );
 
 void
 init_large_malloc()
@@ -341,4 +340,3 @@ test_large_malloc( void )
     }
     SM_ASSERT( get_footprint() - fp == 0 );
 }
-
